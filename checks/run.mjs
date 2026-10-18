@@ -213,9 +213,9 @@ function escapeHtml(text) {
   return text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
-// No request leaves the machine. Google Fonts URLs get the vendored fonts, documents (embeds, popups)
-// get a stub page, and probe.invalid is an execution marker.
-async function fulfilExternal(route, record) {
+// No request leaves the machine. Google Fonts URLs get the fonts vendored in the package the context
+// serves, documents (embeds, popups) get a stub page, and probe.invalid is an execution marker.
+async function fulfilExternal(route, record, packageDir) {
   const request = route.request();
   const url = new URL(request.url());
   if (url.hostname === PROBE_HOST) {
@@ -228,7 +228,7 @@ async function fulfilExternal(route, record) {
     return route.fulfill({ status: 200, contentType: "text/css", headers: CORS, body });
   }
   if (url.hostname === "fonts.gstatic.com" && url.pathname.startsWith("/s/corpus/")) {
-    const body = await readFile(path.join(CANDIDATE_DIR, "fonts", path.basename(url.pathname))).catch(() => null);
+    const body = await readFile(path.join(packageDir, "fonts", path.basename(url.pathname))).catch(() => null);
     return route.fulfill(body ? { status: 200, contentType: "font/woff2", headers: CORS, body } : { status: 404, headers: CORS, body: "" });
   }
   if (request.resourceType() === "document") {
@@ -238,9 +238,9 @@ async function fulfilExternal(route, record) {
   return route.fulfill({ status: 404, body: "" });
 }
 
-async function newContext(browser, record) {
+async function newContext(browser, record, packageDir) {
   const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, locale: "en-US", timezoneId: "UTC" });
-  await context.route((url) => url.hostname !== "127.0.0.1", (route) => fulfilExternal(route, record));
+  await context.route((url) => url.hostname !== "127.0.0.1", (route) => fulfilExternal(route, record, packageDir));
   context.on("page", (page) => watchPage(page, record));
   return context;
 }
@@ -330,17 +330,70 @@ async function printShots(context, site, deck, scheme, shots, problems) {
   for (let i = 0; i < Math.min(count, deck.order.length); i += 1) {
     shots.set(`${deck.name}/${deck.order[i]}/print/${scheme}`, await pages.nth(i).screenshot({ animations: "disabled" }));
   }
+  // The real PDF, so a change in @page or page breaking that splits or merges pages shows up.
+  if (problems) {
+    const pdf = (await page.pdf({ preferCSSPageSize: true, printBackground: true })).toString("latin1");
+    const pdfPages = pdf.match(/\/Type\s*\/Page(?![A-Za-z])/g)?.length ?? 0;
+    if (pdfPages !== deck.order.length) problems.push(`the ${scheme} PDF has ${pdfPages} pages, deck.json lists ${deck.order.length} slides`);
+  }
   await closePage(page);
 }
 
-async function presenterNotes(context, site, deck, problems) {
+const hashOf = (page) => page.evaluate(() => decodeURIComponent(location.hash.slice(1)));
+const textIs = (page, selector, text) => page.waitForFunction(([sel, want]) => document.querySelector(sel)?.textContent === want, [selector, text], { timeout: 5000 }).then(() => true, () => false);
+const hashIs = (page, hash) => page.waitForFunction((want) => decodeURIComponent(location.hash.slice(1)) === want, hash, { timeout: 5000 }).then(() => true, () => false);
+
+// The presenter window follows the audience window over the BroadcastChannel, and the audience follows
+// the presenter back; the notes are read on the way.
+async function presenterSync(context, site, deck, problems) {
   const notes = deck.expect.notes || {};
-  const page = await openDeck(context, site, "?presenter=1", deck.order[0]);
+  const total = deck.order.length;
+  const audience = await openDeck(context, site, "", deck.order[0]);
+  const presenter = await openDeck(context, site, "?presenter=1", deck.order[0]);
   for (const [index, id] of deck.order.entries()) {
-    await showSlide(page, id, index, ".pv-counter", (i) => `${i + 1} / `);
-    const shown = await page.locator(".pv-notes-text").textContent();
+    await showSlide(audience, id, index, ".stage", (i) => `Slide ${i + 1} of `);
+    if (!(await textIs(presenter, ".pv-counter", `${index + 1} / ${total}`))) {
+      problems.push(`presenter did not follow the audience to ${id}: it shows ${await presenter.locator(".pv-counter").textContent()}`);
+      break;
+    }
+    const shown = await presenter.locator(".pv-notes-text").textContent();
     const expected = notes[id] ?? "No notes for this slide.";
     if (shown !== expected) problems.push(`presenter notes for ${id}: ${JSON.stringify(shown)}, expected ${JSON.stringify(expected)}`);
+  }
+  for (let index = total - 2; index >= 0; index -= 1) {
+    await showSlide(presenter, deck.order[index], index, ".pv-counter", (i) => `${i + 1} / `);
+    if (!(await hashIs(audience, deck.order[index]))) {
+      problems.push(`audience did not follow the presenter to ${deck.order[index]}: it is at #${await hashOf(audience)}`);
+      break;
+    }
+  }
+  await closePage(presenter);
+  await closePage(audience);
+}
+
+// Keyboard on the audience view: → walks the deck and the counter follows; O opens the overview with
+// every slide and the current one marked, and Escape closes it.
+async function interact(context, site, deck, problems) {
+  const total = deck.order.length;
+  const page = await openDeck(context, site, "", deck.order[0]);
+  for (let index = 1; index < total; index += 1) {
+    await page.keyboard.press("ArrowRight");
+    if (!(await textIs(page, ".counter", `${index + 1} / ${total}`)) || (await hashOf(page)) !== deck.order[index]) {
+      problems.push(`→ to slide ${index + 1}: counter shows ${await page.locator(".counter").textContent()}, hash is #${await hashOf(page)}`);
+      break;
+    }
+  }
+  await page.keyboard.press("o");
+  const overview = page.locator("dialog.overview[open]");
+  if (await overview.waitFor({ timeout: 5000 }).then(() => true, () => false)) {
+    const items = await overview.locator(".ov-item").count();
+    const current = await overview.locator('.ov-item[aria-current="true"]').getAttribute("data-index").catch(() => null);
+    if (items !== total) problems.push(`the overview lists ${items} slides, deck.json lists ${total}`);
+    if (current !== String(total - 1)) problems.push(`the overview marks slide index ${current} as current, expected ${total - 1}`);
+    await page.keyboard.press("Escape");
+    if (!(await overview.waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false))) problems.push("Escape did not close the overview");
+  } else {
+    problems.push("O did not open the overview");
   }
   await closePage(page);
 }
@@ -422,7 +475,7 @@ async function runCandidate(browser, deck, version) {
   const record = { errors: [], markers: [] };
   const missing = [];
   const site = await serveSite({ packageDir: CANDIDATE_DIR, dataDir: deck.dir, log: (entry) => { if (entry.status >= 400) missing.push(`${entry.status} ${entry.method} ${entry.path}`); } });
-  const context = await newContext(browser, record);
+  const context = await newContext(browser, record, CANDIDATE_DIR);
   const shots = new Map();
   try {
     problems.push(...compareReport(await runCheckMode(context, site), deck, version));
@@ -430,7 +483,8 @@ async function runCandidate(browser, deck, version) {
       await stageShots(context, site, deck, scheme, shots);
       await printShots(context, site, deck, scheme, shots, problems);
     }
-    await presenterNotes(context, site, deck, problems);
+    await presenterSync(context, site, deck, problems);
+    await interact(context, site, deck, problems);
     if (deck.expect.activate) await activate(context, site, deck);
     for (const page of context.pages()) await collectMarkers(page);
   } finally {
@@ -446,7 +500,7 @@ async function runCandidate(browser, deck, version) {
 async function runBaseline(browser, deck, packageDir) {
   const record = { errors: [], markers: [] };
   const site = await serveSite({ packageDir, dataDir: deck.dir });
-  const context = await newContext(browser, record);
+  const context = await newContext(browser, record, packageDir);
   const shots = new Map();
   try {
     for (const scheme of SCHEMES) {

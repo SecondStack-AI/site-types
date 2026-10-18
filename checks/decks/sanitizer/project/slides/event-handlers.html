@@ -1,6 +1,15 @@
 <section>
+  <style>
+    @keyframes nudge { from { opacity: 0.5; } }
+    .anim { animation: nudge 40ms; }
+    .trans { transition: opacity 40ms; }
+    @starting-style { .trans { opacity: 0.5; } }
+  </style>
   <h2>Event handler attributes</h2>
-  <p><img id="x-onload" src="assets/ok.svg" alt="" width="80" height="80" onload="top.__exec_onload = 1"></p>
+  <p><img id="x-onload" src="assets/ok.svg" alt="" width="80" height="80" onload="top.__exec_onload = 1"> <img id="x-onerror" src="data:image/png;base64,AAAA" alt="" width="80" height="80" onerror="top.__exec_onerror = 1"></p>
   <svg onload="top.__exec_svg_onload = 1" width="80" height="80"><circle cx="40" cy="40" r="30" fill="var(--accent)"/></svg>
-  <p><button id="x-onclick" type="button" onclick="top.__exec_onclick = 1">Click</button> <span onmouseover="top.__exec_mouseover = 1" onfocus="top.__exec_focus = 1" tabindex="0">Hover</span></p>
+  <p><button id="x-onclick" type="button" onclick="top.__exec_onclick = 1">Click</button> <span onmouseover="top.__exec_mouseover = 1" onfocus="top.__exec_focus = 1" tabindex="0">Hover</span> <input id="x-autofocus" autofocus onfocus="top.__exec_autofocus = 1" value="autofocus"></p>
+  <p class="anim" onanimationstart="top.__exec_animationstart = 1" onanimationend="top.__exec_animationend = 1">Animated, with animation handlers</p>
+  <p class="trans" ontransitionrun="top.__exec_transitionrun = 1" ontransitionend="top.__exec_transitionend = 1">Transitioned from a starting style, with transition handlers</p>
+  <details open ontoggle="top.__exec_toggle = 1"><summary>Open details</summary>with a toggle handler</details>
 </section>

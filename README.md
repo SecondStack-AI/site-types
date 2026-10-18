@@ -54,6 +54,7 @@ Every site follows its major, so a viewer change reaches every deck on that majo
 - check mode reports an error, or a warning that the deck's `check.json` does not expect, sanitizer removals included;
 - a sanitizer payload leaves an execution marker;
 - a slide's screenshot, on the stage or in print, light or dark, differs from the same deck rendered by the previous release (the highest `slides-v*` tag at or below the candidate version);
+- keyboard navigation, the overview, the presenter window's sync with the audience window, or the PDF page count goes wrong;
 - the package changed but `version` did not go up, or `TYPE_VERSION` in `viewer.js` differs from `type.json`.
 
 The check runs on every pull request. To run it locally:
@@ -74,6 +75,8 @@ To release a new version of Slides:
 3. Run the check and open a pull request; its CI runs the check again.
 4. Merge into `main`.
 5. Tag the merge commit `slides-vX.Y.Z` and push the tag. The tag is the baseline for the next release.
+
+After the tag, delete that version's entries from `checks/accept.json`: they are keyed by the candidate version and never match again. If the tag is forgotten, the next release is compared with the older tag, and the changes accepted for the untagged release come back as failures under a version key that no longer matches; that is the signal to push the missing tag.
 
 ## License
 
