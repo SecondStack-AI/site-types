@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "title": "Sanitizer payloads",
+  "lang": "en",
+  "order": [
+    "inline-script", "event-handlers", "javascript-urls", "srcdoc", "data-urls", "forms",
+    "object-embed", "svg-animation", "base-meta-link", "css-import", "css-urls", "css-escapes",
+    "inline-style", "resources", "mutation-xss", "controls"
+  ],
+  "theme": {
+    "fonts": {
+      "display": { "family": "Probe Display", "href": "https://probe.invalid/fonts.css" },
+      "body": { "family": "Probe Body", "faces": [{ "src": "/api/probe?font-face", "weight": "400" }] }
+    }
+  }
+}

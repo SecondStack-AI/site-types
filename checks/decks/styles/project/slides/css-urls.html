@@ -1,0 +1,13 @@
+<section>
+  <style>
+    .pattern { height: 220px; border-radius: 24px; background: url("assets/pattern.svg") repeat; }
+    .photo { height: 260px; border-radius: 24px; background: url(assets/landscape.svg) center / cover no-repeat; }
+    .dot { width: 120px; height: 120px; background: var(--accent); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3Ccircle cx='.5' cy='.5' r='.5'/%3E%3C/svg%3E") center / contain no-repeat; }
+  </style>
+  <h2>Allowed CSS url() values</h2>
+  <div class="cols middle">
+    <div class="pattern"></div>
+    <div class="photo"></div>
+    <div><div class="dot"></div><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 1'%3E%3Crect width='4' height='1' fill='%23e76f51'/%3E%3C/svg%3E" width="240" height="60" alt=""></div>
+  </div>
+</section>

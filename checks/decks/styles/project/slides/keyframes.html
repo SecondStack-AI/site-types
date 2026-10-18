@@ -1,0 +1,14 @@
+<section>
+  <style>
+    @keyframes rise { from { opacity: 0; transform: translateY(48px); } }
+    li { animation: rise 600ms cubic-bezier(.2, 0, 0, 1) both; }
+    li:nth-child(2) { animation-delay: 150ms; }
+    li:nth-child(3) { animation-delay: 300ms; }
+  </style>
+  <h2>CSS animations replay when the slide is shown</h2>
+  <ul>
+    <li>The base style is the end state</li>
+    <li>Animations run only from the start</li>
+    <li>Stills show the end state</li>
+  </ul>
+</section>

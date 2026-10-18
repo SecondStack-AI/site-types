@@ -1,0 +1,11 @@
+{
+  "warnings": {
+    "markup": ["notes-markup"],
+    "not-last": ["notes-not-last"]
+  },
+  "notes": {
+    "plain": "Mention the currency effect if asked.",
+    "paragraphs": "First paragraph of the notes,\non two source lines.\n\nSecond paragraph after blank lines.",
+    "markup": "Notes are plain text; the markup is dropped."
+  }
+}

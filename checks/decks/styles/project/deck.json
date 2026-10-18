@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "title": "Slide styles",
+  "lang": "en",
+  "order": ["own-style", "keyframes", "transitions", "inline-animation", "svg-animation", "layers", "css-urls", "head-style"]
+}

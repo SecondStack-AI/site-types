@@ -47,6 +47,34 @@ Every SecondStack site follows the newest version of its type's major. So a mino
 
 For Slides this means: within a major, the 1920×1080 frame, the default palette and fonts, the layouts and every building block `SKILL.md` documents change only additively. Sanitizer changes are the exception and are allowed for security. Anything else is a new major, which also bumps `deck.json` `v`.
 
+## Release check
+
+Every site follows its major, so a viewer change reaches every deck on that major at the next Reload. The release check guards that: [`checks/`](./checks) holds a corpus of sample decks, and `checks/run.mjs` serves each deck with the candidate viewer the way SecondStack Sites serves a typed site. It fails when:
+
+- check mode reports an error, or a warning that the deck's `check.json` does not expect, sanitizer removals included;
+- a sanitizer payload leaves an execution marker;
+- a slide's screenshot, on the stage or in print, light or dark, differs from the same deck rendered by the previous release (the highest `slides-v*` tag at or below the candidate version);
+- the package changed but `version` did not go up, or `TYPE_VERSION` in `viewer.js` differs from `type.json`.
+
+The check runs on every pull request. To run it locally:
+
+```sh
+cd checks
+npm ci
+npx playwright install chromium
+node run.mjs --save          # screenshots in checks/out/shots/, diffs in checks/out/diff/
+```
+
+A visual change that is intended within the major (an additive fix, or a security fix to the sanitizer) is accepted per screenshot in `checks/accept.json` under the new version, with a reason. A sanitizer change also updates the expected removals in the affected `check.json`.
+
+To release a new version of Slides:
+
+1. Change the viewer and add a sample deck for any new feature.
+2. Bump `version` in `slides/type.json` and `TYPE_VERSION` in `slides/viewer.js`, and update the version in `slides/SKILL.md`.
+3. Run the check and open a pull request; its CI runs the check again.
+4. Merge into `main`.
+5. Tag the merge commit `slides-vX.Y.Z` and push the tag. The tag is the baseline for the next release.
+
 ## License
 
 The code in this repository is licensed under the [MIT License](./LICENSE). Vendored files inside a package keep their own licenses, listed in the package's `NOTICE.md`: the Slides fonts (SIL OFL 1.1) and DOMPurify (Apache-2.0 or MPL-2.0).

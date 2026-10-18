@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "title": "Building blocks",
+  "lang": "en",
+  "order": [
+    "headings", "inline", "lists", "check-plain", "quote-figure", "table", "code",
+    "cols", "cols-wide-left", "cols-wide-right", "cards", "stats", "steps",
+    "callouts", "grow-bottom", "fill", "definitions", "svg-tokens"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "site-types-checks",
+  "private": true,
+  "type": "module",
+  "description": "Release check for the site types in this repository: sample decks, check mode and screenshots against the previous release.",
+  "scripts": {
+    "check": "node run.mjs",
+    "serve": "node serve.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

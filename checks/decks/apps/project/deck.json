@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "title": "App frames",
+  "lang": "en",
+  "order": ["full-app", "inline-app", "external", "external-no-poster", "after"]
+}

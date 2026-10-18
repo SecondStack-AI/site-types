@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "title": "Layouts",
+  "lang": "en",
+  "order": [
+    "cover", "agenda", "part-one", "statement", "quote", "center",
+    "image", "image-only", "split", "split-media", "blank",
+    "theme-dark", "theme-light", "theme-accent", "footer-off", "footer-on", "closing"
+  ],
+  "sections": {
+    "one": { "title": "Text layouts", "start": "part-one" },
+    "two": { "title": "Media layouts", "start": "image" },
+    "three": { "title": "Slide themes", "start": "theme-dark" }
+  }
+}

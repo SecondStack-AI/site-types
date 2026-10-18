@@ -1,0 +1,10 @@
+<section>
+  <style>
+    h2 { background-image: url("/api/probe?css-url"); }
+    p { --x: url(/api/probe?css-var); background-image: var(--x); }
+    .js { background: url("javascript:top.__exec_css_js = 1"); }
+    .ok { color: var(--accent); }
+  </style>
+  <h2>CSS url() outside the policy</h2>
+  <p class="js ok">Declarations with disallowed URLs are dropped.</p>
+</section>

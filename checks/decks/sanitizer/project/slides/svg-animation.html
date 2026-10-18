@@ -1,0 +1,8 @@
+<section>
+  <h2>SVG animation elements</h2>
+  <svg viewBox="0 0 600 80" width="900" height="120">
+    <a id="x-animate"><animate attributeName="href" to="javascript:top.__exec_animate = 1" begin="0s" fill="freeze"/><text x="0" y="50" fill="var(--accent)">animate</text></a>
+    <a id="x-set"><set attributeName="xlink:href" to="javascript:top.__exec_set = 1"/><text x="200" y="50" fill="var(--accent)">set</text></a>
+    <rect x="400" y="10" width="60" height="60" fill="var(--muted)"><animateTransform attributeName="transform" type="rotate" from="0 430 40" to="360 430 40" dur="1s" repeatCount="indefinite"/></rect>
+  </svg>
+</section>

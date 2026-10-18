@@ -1,0 +1,14 @@
+<section>
+  <style>.bg-css { width: 80px; height: 80px; background-image: url("assets/ok.svg"); }</style>
+  <h2>Allowed markup keeps working</h2>
+  <p>
+    <img src="assets/ok.svg" alt="" width="80" height="80">
+    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3Crect width='1' height='1' fill='%231971c2'/%3E%3C/svg%3E" alt="" width="80" height="80">
+  </p>
+  <div class="cols">
+    <div style="width: 80px; height: 80px; background: url(assets/ok.svg)"></div>
+    <div class="bg-css"></div>
+    <svg viewBox="0 0 30 10" width="240" height="80"><defs><linearGradient id="g"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--muted)"/></linearGradient><symbol id="dot"><circle cx="5" cy="5" r="5"/></symbol></defs><rect width="10" height="10" fill="url(#g)"/><use href="#dot" x="10" fill="var(--accent)"/><use xlink:href="#dot" x="20"/></svg>
+  </div>
+  <p><a href="#inline-script">hash link</a> · <a href="mailto:a@example.com">mail</a> · <a href="https://example.com/" target="_top">external</a></p>
+</section>
