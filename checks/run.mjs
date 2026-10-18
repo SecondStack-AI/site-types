@@ -439,8 +439,9 @@ async function presenterSync(context, site, deck, problems) {
   await closePage(audience);
 }
 
-// Keyboard on the audience view: → walks every step of the deck and the counter and hash follow; O
-// opens the overview with every slide and the current one marked, and Escape closes it.
+// Keyboard on the audience view: → walks every step of the deck and the counter and hash follow; a
+// step announces what it revealed in the live region, and waiting steps are inert. O opens the overview
+// with every slide and the current one marked, and Escape closes it.
 async function interact(context, site, deck, steps, problems) {
   const total = deck.order.length;
   const page = await openDeck(context, site, "", deck.order[0]);
@@ -450,6 +451,16 @@ async function interact(context, site, deck, steps, problems) {
       problems.push(`→ to #${state.hash}: counter shows ${await page.locator(".counter").textContent()}, hash is #${await hashOf(page)}`);
       break;
     }
+    const step = await page.evaluate(() => {
+      const items = [...document.querySelector(".stage .slide-host").shadowRoot.querySelectorAll("[data-step]")];
+      return {
+        live: document.querySelector("#app [aria-live]")?.textContent ?? "",
+        hiddenNotInert: items.filter((el) => el.hasAttribute("data-step-hidden") && !el.hasAttribute("inert")).length,
+        shownInert: items.filter((el) => !el.hasAttribute("data-step-hidden") && el.hasAttribute("inert")).length,
+      };
+    });
+    if (state.hash.includes(".") && (!step.live || step.live.startsWith("Slide "))) problems.push(`→ to #${state.hash}: the live region says ${JSON.stringify(step.live)}, not what the step revealed`);
+    if (step.hiddenNotInert || step.shownInert) problems.push(`#${state.hash}: ${step.hiddenNotInert} waiting step(s) not inert, ${step.shownInert} shown step(s) inert`);
   }
   await page.keyboard.press("o");
   const overview = page.locator("dialog.overview[open]");

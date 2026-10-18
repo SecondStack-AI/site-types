@@ -591,9 +591,18 @@ function slideSteps(root) {
   return { count: values.length, items: numbered.map(({ el, n }) => ({ el, step: values.indexOf(n) + 1 })) };
 }
 
-// Steps after `step` wait hidden; the attribute is the hook for the reveal styles in slide.css.
+// Steps after `step` wait hidden: data-step-hidden is the hook for the reveal styles in slide.css, and
+// inert keeps a waiting step out of the tab order and the accessibility tree even when a slide restyles
+// it as visible. Returns the elements this call revealed.
 function applySteps(frame, step) {
-  for (const item of slideSteps(frame).items) item.el.toggleAttribute("data-step-hidden", item.step > step);
+  const revealed = [];
+  for (const item of slideSteps(frame).items) {
+    const hidden = item.step > step;
+    if (!hidden && item.el.hasAttribute("data-step-hidden")) revealed.push(item.el);
+    item.el.toggleAttribute("data-step-hidden", hidden);
+    item.el.toggleAttribute("inert", hidden);
+  }
+  return revealed;
 }
 
 function parseSlide(id, text) {
@@ -1090,7 +1099,7 @@ function renderInto(slot, index, options) {
 // A step change updates the mounted frame in place, so the reveal can transition and apps keep running.
 function showStep(host) {
   const frame = host.shadowRoot?.querySelector(".frame");
-  if (frame) applySteps(frame, state.step);
+  return frame ? applySteps(frame, state.step) : [];
 }
 
 function total() {
@@ -1116,7 +1125,7 @@ function go(index, { from = "local", step = 0 } = {}) {
   const next = Math.max(0, Math.min(total() - 1, index));
   const moved = next !== state.index;
   const nextStep = Math.max(0, Math.min(stepCount(next), step));
-  const stepped = nextStep !== state.step;
+  const stepped = nextStep === state.step ? false : nextStep > state.step ? "forward" : "back";
   state.index = next;
   state.step = nextStep;
   syncHash();
@@ -1469,7 +1478,11 @@ function audienceView() {
       toolbar.hidden = false;
       progress.hidden = false;
       if (moved || full !== false) renderInto({ slot, host }, state.index, { step: state.step });
-      else if (stepped) showStep(host);
+      else if (stepped) {
+        // Screen readers do not announce content that becomes visible, so a step says what it revealed.
+        const revealed = showStep(host).map((el) => el.textContent.replace(/\s+/g, " ").trim()).filter(Boolean).join(" ");
+        live.textContent = (stepped === "forward" && revealed) || t("stepOf", { n: state.step, total: stepCount() });
+      }
       if (moved) {
         slot.classList.remove("entering");
         void slot.offsetWidth;
