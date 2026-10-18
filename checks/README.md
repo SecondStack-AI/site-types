@@ -11,7 +11,7 @@
 | `apps` | same-origin and external app frames, with and without posters |
 | `notes` | presenter notes |
 | `checkmode` | check mode's own detector: one slide that fits, one that overflows the safe area, one whose `section` clips |
-| `builds` | click-to-reveal steps: `.step`, grouped `data-step`, SVG steps, an author's own effect, an invalid value |
+| `builds` | click-to-reveal steps: `data-step`, equal numbers together, SVG steps, an author's own effect, empty and invalid values, and a `step` class from a deck's own markup that must stay a non-build (steps 0, stage identical to 1.0.0) |
 | `sanitizer` | payloads that must stay inert: script, `on*` (including handlers that fire without a click: `onerror` on a failing image, animation and transition events, `ontoggle`, `autofocus` with `onfocus`), `javascript:` and `data:` URLs (links and frames), `srcdoc`, forms, object/embed, SVG animation, base/meta/link, CSS `@import`, `url()` and escapes, mutation XSS |
 
 Besides check mode and the screenshots, every deck is driven once: → through the audience view, every step included, with the counter checked, O for the overview and Escape to close it; the presenter window follows the audience window and the audience follows the presenter back, with the notes read on the way; and each scheme's PDF is printed and its pages counted.
@@ -43,7 +43,7 @@ Optional, beside `project/`. Without it a deck must produce no issues and no not
 - `warnings` and `deckWarnings` list every warning check mode reports, by slide id. `removed` lists the removed elements (`<script>`), attribute names (`onload`) and `style declaration`; it is required for `unsafe-removed`.
 - `errors` lists the error codes a slide must cause: an image whose `src` the sanitizer removed cannot load, and the `checkmode` slides must be reported. Ordinary decks have none.
 - `notes` lists every slide with notes and the text the presenter window shows.
-- `steps` lists every slide with builds and its step count.
+- `steps` lists every slide with builds and its step count; every other slide must have none, and listing one with 0 makes that explicit.
 - `navigate` walks every step with → in the presenter window and back with ← in the audience window, checks that the other window follows and that the presenter shows "Step n of N", and checks that each step's deep link (`#id.2`) renders as the stage did when it walked there.
 - `activate` clicks, focuses and hovers every interactive element on the stage.
 

@@ -2,5 +2,14 @@
   "v": 1,
   "title": "Builds",
   "lang": "en",
-  "order": ["list", "plain", "groups", "diagram", "custom-effect", "invalid", "closing"]
+  "order": [
+    "list",
+    "plain",
+    "groups",
+    "diagram",
+    "custom-effect",
+    "invalid",
+    "step-class",
+    "closing"
+  ]
 }

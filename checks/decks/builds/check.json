@@ -1,6 +1,6 @@
 {
   "navigate": true,
-  "steps": { "list": 3, "groups": 2, "diagram": 2, "custom-effect": 2, "invalid": 1, "closing": 1 },
+  "steps": { "list": 3, "groups": 2, "diagram": 2, "custom-effect": 2, "invalid": 1, "step-class": 0, "closing": 1 },
   "warnings": { "invalid": ["step-invalid"] },
   "notes": { "list": "Three clicks before the next slide." }
 }

@@ -430,14 +430,14 @@
 :where(.frame[data-layout="blank"] > section) { padding: 0; gap: 0; }
 
 /* Builds. The viewer sets data-step-hidden on steps not revealed yet; they keep their place, so the
-   layout does not move. Stills never set it. A slide's own rules for .step, [data-step] and
+   layout does not move. Stills never set it. A slide's own rules for [data-step] and
    [data-step-hidden] win, so an author can change the effect. Revealed steps look exactly as
    without a build. */
 
-:where(.step, [data-step]) { transition: opacity 300ms cubic-bezier(0.2, 0, 0, 1), visibility 300ms; }
+:where([data-step]) { transition: opacity 300ms cubic-bezier(0.2, 0, 0, 1), visibility 300ms; }
 :where([data-step-hidden]) { opacity: 0; visibility: hidden; }
 @media (prefers-reduced-motion: reduce) {
-  .step, [data-step] { transition-duration: 1ms !important; animation-duration: 1ms !important; }
+  [data-step] { transition-duration: 1ms !important; animation-duration: 1ms !important; }
 }
 
 /* Viewer furniture */

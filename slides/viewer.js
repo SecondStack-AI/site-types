@@ -577,16 +577,15 @@ function sanitizeSection(section, issues) {
 
 const STEP_RE = /^\s*[1-9]\d{0,2}\s*$/;
 
-// Builds: .step elements are numbered 1, 2, 3 in document order, data-step="N" numbers an element
-// explicitly, and elements with the same number are revealed together. Numbers only order the steps,
-// so data-step 2 and 5 are steps 1 and 2. An element whose data-step is not a number is always shown.
+// Builds: data-step="N" puts an element in step N, and elements with the same number are revealed
+// together. Numbers only order the steps, so data-step 2 and 5 are steps 1 and 2. An element whose
+// data-step is empty or not a number is always shown. Only the new attribute opts in: markup that
+// 1.0.0 decks may already use, such as a "step" class, must keep rendering as before.
 function slideSteps(root) {
   const numbered = [];
-  let auto = 0;
-  for (const el of root.querySelectorAll("[data-step], .step")) {
+  for (const el of root.querySelectorAll("[data-step]")) {
     const raw = el.getAttribute("data-step");
-    if (raw === null) numbered.push({ el, n: (auto += 1) });
-    else if (STEP_RE.test(raw)) numbered.push({ el, n: Number(raw) });
+    if (STEP_RE.test(raw)) numbered.push({ el, n: Number(raw) });
   }
   const values = [...new Set(numbered.map((item) => item.n))].sort((a, b) => a - b);
   return { count: values.length, items: numbered.map(({ el, n }) => ({ el, step: values.indexOf(n) + 1 })) };
@@ -650,7 +649,7 @@ function parseSlide(id, text) {
   const cleanSection = clean.querySelector("section") || clean;
   const invalidSteps = [...cleanSection.querySelectorAll("[data-step]")].filter((el) => !STEP_RE.test(el.getAttribute("data-step")));
   if (invalidSteps.length) {
-    issues.push(issue("warning", "step-invalid", `data-step must be a whole number from 1 to 999; ${invalidSteps.length} element(s) with another value are always shown`));
+    issues.push(issue("warning", "step-invalid", `data-step must be a whole number from 1 to 999; ${invalidSteps.length} element(s) without one are always shown`));
   }
   const titleSource = (cleanSection.querySelector("h1, h2, h3") || cleanSection).cloneNode(true);
   for (const br of titleSource.querySelectorAll("br")) br.replaceWith(" ");
