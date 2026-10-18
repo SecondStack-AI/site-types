@@ -199,11 +199,13 @@ function compareReport(report, deck, version) {
   const warnings = deck.expect.warnings || {};
   const errors = deck.expect.errors || {};
   const notes = deck.expect.notes || {};
+  const steps = deck.expect.steps || {};
   for (const slide of report.slides) {
+    if ("steps" in slide && slide.steps !== (steps[slide.id] || 0)) problems.push(`${slide.file}: check mode reports ${slide.steps} steps, check.json says ${steps[slide.id] || 0}`);
     compareIssues(slide.file, slide.issues, warnings[slide.id] || [], errors[slide.id] || [], problems);
     if (slide.notes !== slide.id in notes) problems.push(`${slide.file}: check mode says notes ${slide.notes ? "present" : "absent"}, check.json says ${slide.id in notes ? "present" : "absent"}`);
   }
-  for (const id of [...Object.keys(warnings), ...Object.keys(errors), ...Object.keys(notes)]) {
+  for (const id of [...Object.keys(warnings), ...Object.keys(errors), ...Object.keys(notes), ...Object.keys(steps)]) {
     if (!deck.order.includes(id)) problems.push(`check.json names ${id}, which is not in deck.json order`);
   }
   return problems;
@@ -294,8 +296,13 @@ async function openDeck(context, site, query, id) {
   return page;
 }
 
-async function showSlide(page, id, index, selector, prefix) {
-  await page.evaluate((target) => { if (decodeURIComponent(location.hash.slice(1)) !== target) location.hash = target; }, id);
+// Sets the hash and waits until the viewer has handled it. `target` is a slide id, or "<id>.<step>".
+async function showSlide(page, target, index, selector, prefix) {
+  await page.evaluate((hash) => new Promise((resolve) => {
+    if (decodeURIComponent(location.hash.slice(1)) === hash) return resolve();
+    addEventListener("hashchange", () => requestAnimationFrame(() => resolve()), { once: true });
+    location.hash = hash;
+  }), target);
   await page.waitForFunction(([sel, text]) => (document.querySelector(sel)?.getAttribute("aria-label") ?? document.querySelector(sel)?.textContent ?? "").startsWith(text), [selector, prefix(index)]);
 }
 
@@ -308,15 +315,76 @@ async function runCheckMode(context, site) {
   return report;
 }
 
-async function stageShots(context, site, deck, scheme, shots) {
+// The stage states of a deck in presentation order: every step of every slide. A slide's last state,
+// with every step shown, is "<deck>/<id>/stage/<scheme>", the key a viewer without builds produces.
+function stageStates(deck, steps) {
+  return deck.order.flatMap((id, index) => Array.from({ length: (steps[index] || 0) + 1 }, (_, step) => ({
+    id,
+    index,
+    hash: step ? `${id}.${step}` : id,
+    key: step === (steps[index] || 0) ? `${deck.name}/${id}/stage` : `${deck.name}/${id}/stage-step-${step}`,
+  })));
+}
+
+async function stageShot(page) {
+  return page.locator(".stage .slide-host").screenshot({ animations: "disabled", caret: "hide" });
+}
+
+async function stageShots(context, site, deck, steps, scheme, shots) {
   const page = await openDeck(context, site, `?theme=${scheme}`, deck.order[0]);
   await page.addStyleTag({ content: HIDE_CHROME });
-  for (const [index, id] of deck.order.entries()) {
-    await showSlide(page, id, index, ".stage", (i) => `Slide ${i + 1} of `);
+  for (const state of stageStates(deck, steps)) {
+    await showSlide(page, state.hash, state.index, ".stage", (i) => `Slide ${i + 1} of `);
     await settle(page);
-    shots.set(`${deck.name}/${id}/stage/${scheme}`, await page.locator(".stage .slide-host").screenshot({ animations: "disabled", caret: "hide" }));
+    shots.set(`${state.key}/${scheme}`, await stageShot(page));
   }
   await closePage(page);
+}
+
+// Builds: → and ← walk every step in the presenter window and the audience follows, both ways; the
+// presenter shows "Step n of N"; each state's deep link renders as the stage did when it walked there.
+async function navigate(context, site, deck, steps, shots, diff, problems) {
+  const states = stageStates(deck, steps);
+  const audience = await openDeck(context, site, "?theme=light", deck.order[0]);
+  await audience.addStyleTag({ content: HIDE_CHROME });
+  const presenter = await openDeck(context, site, "?presenter=1", deck.order[0]);
+  const expectState = async (state, label) => {
+    const want = state.hash;
+    try {
+      await Promise.all([audience, presenter].map((page) => page.waitForFunction((hash) => decodeURIComponent(location.hash.slice(1)) === hash, want, { timeout: 5000 })));
+    } catch {
+      problems.push(`${label}: expected #${want}, presenter at #${await hashOf(presenter)}, audience at #${await hashOf(audience)}`);
+      return false;
+    }
+    const count = steps[state.index] || 0;
+    const step = Number(want.split(".")[1] || 0);
+    const shown = (await presenter.locator(".pv-step").textContent()) || "";
+    const expected = count ? `Step ${step} of ${count}` : "";
+    if (shown !== expected) problems.push(`${label}: presenter shows ${JSON.stringify(shown)} at #${want}, expected ${JSON.stringify(expected)}`);
+    return true;
+  };
+  for (let i = 1; i < states.length; i += 1) {
+    await presenter.keyboard.press("ArrowRight");
+    if (!(await expectState(states[i], "→ in the presenter window"))) break;
+  }
+  await presenter.keyboard.press("ArrowRight");
+  await expectState(states.at(-1), "→ at the end");
+  for (let i = states.length - 2; i >= 0; i -= 1) {
+    await audience.keyboard.press("ArrowLeft");
+    if (!(await expectState(states[i], "← in the audience window"))) break;
+  }
+  await closePage(presenter);
+  for (const state of states) {
+    await audience.goto(`${site.url}/?theme=light#${state.hash}`);
+    await audience.waitForFunction(() => !document.getElementById("app").hasAttribute("aria-busy"));
+    await audience.addStyleTag({ content: HIDE_CHROME });
+    if ((await hashOf(audience)) !== state.hash) problems.push(`deep link #${state.hash} ended at #${await hashOf(audience)}`);
+    await settle(audience);
+    const walked = shots.get(`${state.key}/light`);
+    const { ratio } = await diff(walked, await stageShot(audience), false);
+    if (ratio > MAX_DIFF_RATIO) problems.push(`deep link #${state.hash} renders differently from walking there (${(ratio * 100).toFixed(3)}% of pixels)`);
+  }
+  await closePage(audience);
 }
 
 async function printShots(context, site, deck, scheme, shots, problems) {
@@ -371,15 +439,15 @@ async function presenterSync(context, site, deck, problems) {
   await closePage(audience);
 }
 
-// Keyboard on the audience view: → walks the deck and the counter follows; O opens the overview with
-// every slide and the current one marked, and Escape closes it.
-async function interact(context, site, deck, problems) {
+// Keyboard on the audience view: → walks every step of the deck and the counter and hash follow; O
+// opens the overview with every slide and the current one marked, and Escape closes it.
+async function interact(context, site, deck, steps, problems) {
   const total = deck.order.length;
   const page = await openDeck(context, site, "", deck.order[0]);
-  for (let index = 1; index < total; index += 1) {
+  for (const state of stageStates(deck, steps).slice(1)) {
     await page.keyboard.press("ArrowRight");
-    if (!(await textIs(page, ".counter", `${index + 1} / ${total}`)) || (await hashOf(page)) !== deck.order[index]) {
-      problems.push(`→ to slide ${index + 1}: counter shows ${await page.locator(".counter").textContent()}, hash is #${await hashOf(page)}`);
+    if (!(await textIs(page, ".counter", `${state.index + 1} / ${total}`)) || !(await hashIs(page, state.hash))) {
+      problems.push(`→ to #${state.hash}: counter shows ${await page.locator(".counter").textContent()}, hash is #${await hashOf(page)}`);
       break;
     }
   }
@@ -470,7 +538,9 @@ async function saveShot(file, bytes) {
 }
 
 // Serves one deck with the candidate package and checks everything but the visual diff.
-async function runCandidate(browser, deck, version) {
+const stepsOf = (report) => report.slides.map((slide) => slide.steps || 0);
+
+async function runCandidate(browser, deck, version, diff) {
   const problems = [];
   const record = { errors: [], markers: [] };
   const missing = [];
@@ -478,13 +548,16 @@ async function runCandidate(browser, deck, version) {
   const context = await newContext(browser, record, CANDIDATE_DIR);
   const shots = new Map();
   try {
-    problems.push(...compareReport(await runCheckMode(context, site), deck, version));
+    const report = await runCheckMode(context, site);
+    problems.push(...compareReport(report, deck, version));
+    const steps = stepsOf(report);
     for (const scheme of SCHEMES) {
-      await stageShots(context, site, deck, scheme, shots);
+      await stageShots(context, site, deck, steps, scheme, shots);
       await printShots(context, site, deck, scheme, shots, problems);
     }
     await presenterSync(context, site, deck, problems);
-    await interact(context, site, deck, problems);
+    await interact(context, site, deck, steps, problems);
+    if (deck.expect.navigate) await navigate(context, site, deck, steps, shots, diff, problems);
     if (deck.expect.activate) await activate(context, site, deck);
     for (const page of context.pages()) await collectMarkers(page);
   } finally {
@@ -503,8 +576,9 @@ async function runBaseline(browser, deck, packageDir) {
   const context = await newContext(browser, record, packageDir);
   const shots = new Map();
   try {
+    const steps = stepsOf(await runCheckMode(context, site));
     for (const scheme of SCHEMES) {
-      await stageShots(context, site, deck, scheme, shots);
+      await stageShots(context, site, deck, steps, scheme, shots);
       await printShots(context, site, deck, scheme, shots);
     }
   } finally {
@@ -542,7 +616,7 @@ async function main() {
     for (const deck of decks) {
       const started = Date.now();
       const [result, baseShots] = await Promise.all([
-        runCandidate(browser, deck, candidate.text),
+        runCandidate(browser, deck, candidate.text, diff),
         baseline ? runBaseline(browser, deck, baseline.packageDir) : null,
       ]);
       const visual = { identical: 0, withinThreshold: [], accepted: [], failed: [], new: [] };

@@ -342,6 +342,7 @@ kbd {
 .pv-time.paused { color: var(--s-muted); }
 .pv-clock { font-size: 14px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
 .pv-counter { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pv-step { font-size: 14px; font-weight: 600; color: var(--s-accent); font-variant-numeric: tabular-nums; }
 .pv-main { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr); gap: 18px; padding: 18px; min-height: 0; }
 .pv-current { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; }
 .pv-current .slot { border-radius: 8px; box-shadow: 0 0 0 1px var(--s-border); }

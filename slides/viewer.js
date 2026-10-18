@@ -5,7 +5,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.0.0"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.1.0"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 const W = 1920;
 const H = 1080;
@@ -35,7 +35,7 @@ const STRINGS = {
     notes: "Notes", noNotes: "No notes for this slide.", nextUp: "Next", end: "End of presentation",
     elapsed: "Elapsed", pause: "Pause timer", resume: "Resume timer", reset: "Reset timer",
     smaller: "Smaller notes", larger: "Larger notes", blackout: "Black screen", goTo: "Go to slide number",
-    firstLast: "First or last slide",
+    firstLast: "First or last slide", stepOf: "Step {n} of {total}",
     updated: "This presentation was updated. Reload the page to see the new version.", reload: "Reload",
   },
   de: {
@@ -49,7 +49,7 @@ const STRINGS = {
     notes: "Notizen", noNotes: "Keine Notizen zu dieser Folie.", nextUp: "Als Nächstes", end: "Ende der Präsentation",
     elapsed: "Verstrichen", pause: "Timer anhalten", resume: "Timer fortsetzen", reset: "Timer zurücksetzen",
     smaller: "Kleinere Notizen", larger: "Größere Notizen", blackout: "Schwarzer Bildschirm", goTo: "Zu Foliennummer springen",
-    firstLast: "Erste oder letzte Folie",
+    firstLast: "Erste oder letzte Folie", stepOf: "Schritt {n} von {total}",
     updated: "Diese Präsentation wurde aktualisiert. Laden Sie die Seite neu, um die neue Version zu sehen.", reload: "Neu laden",
   },
   es: {
@@ -63,7 +63,7 @@ const STRINGS = {
     notes: "Notas", noNotes: "Esta diapositiva no tiene notas.", nextUp: "Siguiente", end: "Fin de la presentación",
     elapsed: "Transcurrido", pause: "Pausar el temporizador", resume: "Reanudar el temporizador", reset: "Reiniciar el temporizador",
     smaller: "Notas más pequeñas", larger: "Notas más grandes", blackout: "Pantalla en negro", goTo: "Ir al número de diapositiva",
-    firstLast: "Primera o última diapositiva",
+    firstLast: "Primera o última diapositiva", stepOf: "Paso {n} de {total}",
     updated: "Esta presentación se ha actualizado. Recarga la página para ver la nueva versión.", reload: "Recargar",
   },
   fr: {
@@ -77,7 +77,7 @@ const STRINGS = {
     notes: "Notes", noNotes: "Aucune note pour cette diapositive.", nextUp: "Suivante", end: "Fin de la présentation",
     elapsed: "Écoulé", pause: "Mettre le minuteur en pause", resume: "Reprendre le minuteur", reset: "Réinitialiser le minuteur",
     smaller: "Notes plus petites", larger: "Notes plus grandes", blackout: "Écran noir", goTo: "Aller au numéro de diapositive",
-    firstLast: "Première ou dernière diapositive",
+    firstLast: "Première ou dernière diapositive", stepOf: "Étape {n} sur {total}",
     updated: "Cette présentation a été mise à jour. Rechargez la page pour voir la nouvelle version.", reload: "Recharger",
   },
   pl: {
@@ -91,7 +91,7 @@ const STRINGS = {
     notes: "Notatki", noNotes: "Brak notatek do tego slajdu.", nextUp: "Następny", end: "Koniec prezentacji",
     elapsed: "Upłynęło", pause: "Wstrzymaj stoper", resume: "Wznów stoper", reset: "Wyzeruj stoper",
     smaller: "Mniejsze notatki", larger: "Większe notatki", blackout: "Czarny ekran", goTo: "Przejdź do slajdu o numerze",
-    firstLast: "Pierwszy lub ostatni slajd",
+    firstLast: "Pierwszy lub ostatni slajd", stepOf: "Krok {n} z {total}",
     updated: "Ta prezentacja została zaktualizowana. Odśwież stronę, aby zobaczyć nową wersję.", reload: "Odśwież",
   },
   ru: {
@@ -105,7 +105,7 @@ const STRINGS = {
     notes: "Заметки", noNotes: "К этому слайду нет заметок.", nextUp: "Далее", end: "Конец презентации",
     elapsed: "Прошло", pause: "Приостановить таймер", resume: "Продолжить таймер", reset: "Сбросить таймер",
     smaller: "Уменьшить заметки", larger: "Увеличить заметки", blackout: "Чёрный экран", goTo: "Перейти к слайду по номеру",
-    firstLast: "Первый или последний слайд",
+    firstLast: "Первый или последний слайд", stepOf: "Шаг {n} из {total}",
     updated: "Эта презентация обновлена. Перезагрузите страницу, чтобы увидеть новую версию.", reload: "Перезагрузить",
   },
 };
@@ -163,13 +163,18 @@ function iconButton(name, label, onclick, extraClass) {
   return h("button", { type: "button", class: `icon-btn ${extraClass || ""}`, "aria-label": label, title: label, onclick }, icon(name));
 }
 
-function hashId() {
+// The hash is "<slide id>" or "<slide id>.<step>"; slide ids have no dots.
+function parseHash() {
+  let raw;
   try {
-    return decodeURIComponent(location.hash.slice(1)) || null;
+    raw = decodeURIComponent(location.hash.slice(1));
   } catch {
-    return null;
+    return { id: null, step: 0 };
   }
+  const match = /^(.*?)(?:\.(\d{1,3}))?$/.exec(raw);
+  return { id: match[1] || null, step: match[2] ? Number(match[2]) : 0 };
 }
+const initialHash = parseHash();
 
 const params = new URLSearchParams(location.search);
 const CHECK = params.get("check") === "1";
@@ -185,7 +190,9 @@ const state = {
   deckIssues: [],
   slides: new Map(), // id -> slide record
   index: 0,
-  pendingId: hashId(),
+  step: 0, // steps of the current slide revealed so far
+  pendingId: initialHash.id,
+  pendingStep: initialHash.step,
   scheme: "light",
   blackout: false,
 };
@@ -568,6 +575,28 @@ function sanitizeSection(section, issues) {
   return clean;
 }
 
+const STEP_RE = /^\s*[1-9]\d{0,2}\s*$/;
+
+// Builds: .step elements are numbered 1, 2, 3 in document order, data-step="N" numbers an element
+// explicitly, and elements with the same number are revealed together. Numbers only order the steps,
+// so data-step 2 and 5 are steps 1 and 2. An element whose data-step is not a number is always shown.
+function slideSteps(root) {
+  const numbered = [];
+  let auto = 0;
+  for (const el of root.querySelectorAll("[data-step], .step")) {
+    const raw = el.getAttribute("data-step");
+    if (raw === null) numbered.push({ el, n: (auto += 1) });
+    else if (STEP_RE.test(raw)) numbered.push({ el, n: Number(raw) });
+  }
+  const values = [...new Set(numbered.map((item) => item.n))].sort((a, b) => a - b);
+  return { count: values.length, items: numbered.map(({ el, n }) => ({ el, step: values.indexOf(n) + 1 })) };
+}
+
+// Steps after `step` wait hidden; the attribute is the hook for the reveal styles in slide.css.
+function applySteps(frame, step) {
+  for (const item of slideSteps(frame).items) item.el.toggleAttribute("data-step-hidden", item.step > step);
+}
+
 function parseSlide(id, text) {
   const issues = [];
   const doc = new DOMParser().parseFromString(text, "text/html");
@@ -619,6 +648,10 @@ function parseSlide(id, text) {
   const clean = sanitizeSection(section, issues);
   const sheets = styleTexts.length ? [sanitizeStylesheet(styleTexts.join("\n"), issues)] : [];
   const cleanSection = clean.querySelector("section") || clean;
+  const invalidSteps = [...cleanSection.querySelectorAll("[data-step]")].filter((el) => !STEP_RE.test(el.getAttribute("data-step")));
+  if (invalidSteps.length) {
+    issues.push(issue("warning", "step-invalid", `data-step must be a whole number from 1 to 999; ${invalidSteps.length} element(s) with another value are always shown`));
+  }
   const titleSource = (cleanSection.querySelector("h1, h2, h3") || cleanSection).cloneNode(true);
   for (const br of titleSource.querySelectorAll("br")) br.replaceWith(" ");
   const title = titleSource.textContent.replace(/\s+/g, " ").trim().slice(0, 120) || id;
@@ -631,6 +664,7 @@ function parseSlide(id, text) {
     footer: section.getAttribute("data-footer"),
     title,
     notes,
+    steps: slideSteps(cleanSection).count,
     issues,
   };
 }
@@ -942,7 +976,8 @@ function sectionAt(index) {
   return found;
 }
 
-function buildFrame(index, { thumb = false } = {}) {
+// A still (thumb) frame shows every step; a live frame shows the steps up to `step`.
+function buildFrame(index, { thumb = false, step = 0 } = {}) {
   const id = state.deck.order[index];
   const slide = state.slides.get(id);
   const frame = h("div", { class: "frame", lang: state.deck.lang || null });
@@ -990,6 +1025,7 @@ function buildFrame(index, { thumb = false } = {}) {
       if (poster) iframe.style.backgroundImage = `url("${poster.replace(/["\n]/g, encodeURIComponent)}")`;
     }
   } else {
+    applySteps(frame, step);
     for (const iframe of frame.querySelectorAll("iframe")) handBackEscape(iframe);
   }
   return { frame, sheets: slide.sheets, still: thumb };
@@ -1052,6 +1088,12 @@ function renderInto(slot, index, options) {
   mountFrame(slot.host, buildFrame(index, options));
 }
 
+// A step change updates the mounted frame in place, so the reveal can transition and apps keep running.
+function showStep(host) {
+  const frame = host.shadowRoot?.querySelector(".frame");
+  if (frame) applySteps(frame, state.step);
+}
+
 function total() {
   return state.deck ? state.deck.order.length : 0;
 }
@@ -1060,15 +1102,47 @@ function currentId() {
   return state.deck?.order[state.index] ?? null;
 }
 
-function go(index, { from = "local" } = {}) {
+function stepCount(index = state.index) {
+  return state.slides.get(state.deck?.order[index])?.steps || 0;
+}
+
+function syncHash() {
+  const hash = `#${encodeURIComponent(currentId())}${state.step ? `.${state.step}` : ""}`;
+  if (location.hash !== hash) history.replaceState(null, "", `${location.pathname}${location.search}${hash}`);
+}
+
+// Jumps land on step 0; `step` is clamped to the slide's steps.
+function go(index, { from = "local", step = 0 } = {}) {
   if (!total()) return;
   const next = Math.max(0, Math.min(total() - 1, index));
   const moved = next !== state.index;
+  const nextStep = Math.max(0, Math.min(stepCount(next), step));
+  const stepped = nextStep !== state.step;
   state.index = next;
-  const id = currentId();
-  if (location.hash.slice(1) !== id) history.replaceState(null, "", `${location.pathname}${location.search}#${encodeURIComponent(id)}`);
-  view.render?.({ moved, full: false });
-  if (from === "local") sync.post({ kind: "goto", id });
+  state.step = nextStep;
+  syncHash();
+  view.render?.({ moved, stepped, full: false });
+  if (from === "local") sync.post({ kind: "goto", id: currentId(), step: state.step });
+}
+
+// Forward reveals the next step before it leaves the slide; back hides the last step, and coming back
+// to the previous slide shows it with every step.
+function goNext() {
+  if (state.step < stepCount()) go(state.index, { step: state.step + 1 });
+  else if (state.index < total() - 1) go(state.index + 1);
+}
+
+function goPrevious() {
+  if (state.step > 0) go(state.index, { step: state.step - 1 });
+  else if (state.index > 0) go(state.index - 1, { step: stepCount(state.index - 1) });
+}
+
+function atStart() {
+  return state.index === 0 && state.step === 0;
+}
+
+function atEnd() {
+  return state.index === total() - 1 && state.step >= stepCount();
 }
 
 function goToId(id, options) {
@@ -1077,8 +1151,8 @@ function goToId(id, options) {
 }
 
 window.addEventListener("hashchange", () => {
-  const id = hashId();
-  if (id && id !== currentId()) goToId(id);
+  const { id, step } = parseHash();
+  if (id && (id !== currentId() || step !== state.step)) goToId(id, { step });
 });
 
 let digitBuffer = "";
@@ -1101,13 +1175,13 @@ function onKeyDown(event) {
     go(Number(digitBuffer) - 1);
     digitBuffer = "";
   } else if (["ArrowRight", "ArrowDown", "PageDown", "n", "j", "l"].includes(key) || (key === " " && !event.shiftKey)) {
-    go(state.index + 1);
+    goNext();
   } else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace", "h", "k"].includes(key) || (key === " " && event.shiftKey)) {
-    go(state.index - 1);
+    goPrevious();
   } else if (key === "Home") {
     go(0);
   } else if (key === "End") {
-    go(total() - 1);
+    go(total() - 1, { step: stepCount(total() - 1) });
   } else if (key === "o" || key === "g") {
     openOverview();
   } else if (key === "f") {
@@ -1155,10 +1229,11 @@ const sync = (() => {
   channel?.addEventListener("message", ({ data }) => {
     if (!data || data.sender === sender || data.role === role) return;
     if (data.kind === "goto") {
-      if (state.deck) goToId(data.id, { from: "remote" });
-      else state.pendingId = data.id;
+      const step = Number.isInteger(data.step) ? data.step : 0;
+      if (state.deck) goToId(data.id, { from: "remote", step });
+      else Object.assign(state, { pendingId: data.id, pendingStep: step });
     } else if (data.kind === "hello" && currentId()) {
-      post({ kind: "goto", id: currentId() });
+      post({ kind: "goto", id: currentId(), step: state.step });
       post({ kind: "scheme", scheme: state.scheme });
     } else if (data.kind === "scheme" && (data.scheme === "light" || data.scheme === "dark")) {
       setScheme(data.scheme);
@@ -1312,8 +1387,8 @@ function audienceView() {
   slot.setAttribute("aria-roledescription", "slide");
   const progress = h("div", { class: "progress" }, h("i"));
   const counter = h("div", { class: "counter", "aria-hidden": "true" });
-  const prev = iconButton("prev", t("previous"), () => go(state.index - 1));
-  const next = iconButton("next", t("next"), () => go(state.index + 1));
+  const prev = iconButton("prev", t("previous"), goPrevious);
+  const next = iconButton("next", t("next"), goNext);
   const themeButton = iconButton("moon", t("toDark"), toggleScheme, "wide-only");
   const fullButton = iconButton("expand", t("fullscreen"), toggleFullscreen);
   const toolbar = h("div", { class: "toolbar", role: "toolbar", "aria-label": t("slides") },
@@ -1346,7 +1421,8 @@ function audienceView() {
     const interactive = event.composedPath().some((node) => node instanceof Element && node.matches("a, button, input, select, textarea, label, summary, details, video, audio, iframe, [contenteditable], [tabindex]"));
     if (interactive) return;
     const rect = slot.getBoundingClientRect();
-    go(event.clientX - rect.left < rect.width / 3 ? state.index - 1 : state.index + 1);
+    if (event.clientX - rect.left < rect.width / 3) goPrevious();
+    else goNext();
   });
   let touch = null;
   slot.addEventListener("touchstart", (event) => {
@@ -1360,7 +1436,8 @@ function audienceView() {
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) {
       suppressClick = true;
       setTimeout(() => { suppressClick = false; }, 400);
-      go(dx < 0 ? state.index + 1 : state.index - 1);
+      if (dx < 0) goNext();
+      else goPrevious();
     }
   });
 
@@ -1377,7 +1454,7 @@ function audienceView() {
   updateChrome();
 
   return {
-    render({ moved, full } = {}) {
+    render({ moved, stepped, full } = {}) {
       notice?.remove();
       notice = null;
       if (state.deckStatus !== "ok" || !total()) {
@@ -1392,7 +1469,8 @@ function audienceView() {
       }
       toolbar.hidden = false;
       progress.hidden = false;
-      if (moved || full !== false) renderInto({ slot, host }, state.index);
+      if (moved || full !== false) renderInto({ slot, host }, state.index, { step: state.step });
+      else if (stepped) showStep(host);
       if (moved) {
         slot.classList.remove("entering");
         void slot.offsetWidth;
@@ -1401,8 +1479,8 @@ function audienceView() {
       const n = state.index + 1;
       counter.replaceChildren(h("b", { text: String(n) }), ` / ${total()}`);
       progress.firstChild.style.width = `${(n / total()) * 100}%`;
-      prev.disabled = state.index === 0;
-      next.disabled = state.index === total() - 1;
+      prev.disabled = atStart();
+      next.disabled = atEnd();
       const title = state.slides.get(currentId())?.title || currentId();
       slot.setAttribute("aria-label", `${t("slideOf", { n, total: total() })}: ${title}`);
       if (moved) live.textContent = `${t("slideOf", { n, total: total() })}: ${title}`;
@@ -1419,6 +1497,7 @@ function presenterView() {
   const endBox = h("div", { class: "pv-end", text: t("end") });
   const notesText = h("div", { class: "pv-notes-text" });
   const counter = h("span", { class: "pv-counter" });
+  const stepLabel = h("span", { class: "pv-step" });
   const timeEl = h("span", { class: "pv-time", "aria-label": t("elapsed"), role: "timer" });
   const clock = h("span", { class: "pv-clock" });
   const title = h("div", { class: "pv-title" });
@@ -1457,8 +1536,8 @@ function presenterView() {
     themeButton.setAttribute("aria-label", isDark ? t("toLight") : t("toDark"));
     themeButton.title = themeButton.getAttribute("aria-label");
   });
-  const prevButton = h("button", { type: "button", class: "text-btn", onclick: () => go(state.index - 1) }, icon("prev"), t("previous"));
-  const nextButton = h("button", { type: "button", class: "text-btn", onclick: () => go(state.index + 1) }, t("next"), icon("next"));
+  const prevButton = h("button", { type: "button", class: "text-btn", onclick: goPrevious }, icon("prev"), t("previous"));
+  const nextButton = h("button", { type: "button", class: "text-btn", onclick: goNext }, t("next"), icon("next"));
   const side = h("div", { class: "pv-side" }, nextBox,
     h("div", { class: "pv-notes" },
       h("p", { class: "pv-label" }, h("span", { text: t("notes") }), h("span", { class: "pv-size" },
@@ -1472,7 +1551,7 @@ function presenterView() {
   app.replaceChildren(
     h("header", { class: "pv-head" }, title,
       h("span", { class: "pv-timer" }, timeEl, pauseButton, iconButton("reset", t("reset"), () => { started = Date.now(); pausedAt = pausedAt ? started : null; tick(); })),
-      clock, counter),
+      clock, stepLabel, counter),
     main,
     h("footer", { class: "pv-foot" }, h("div", { class: "pv-nav" }, prevButton, nextButton),
       h("div", { class: "pv-nav" }, iconButton("grid", t("overview"), openOverview), themeButton, iconButton("help", t("shortcuts"), openHelp))),
@@ -1481,7 +1560,7 @@ function presenterView() {
   tick();
   let notice = null;
   return {
-    render({ moved, full } = {}) {
+    render({ moved, stepped, full } = {}) {
       notice?.remove();
       notice = null;
       if (state.deckStatus !== "ok" || !total()) {
@@ -1491,7 +1570,8 @@ function presenterView() {
         return;
       }
       main.hidden = false;
-      if (moved || full !== false) renderInto(current, state.index);
+      if (moved || full !== false) renderInto(current, state.index, { step: state.step });
+      else if (stepped) showStep(current.host);
       const hasNext = state.index + 1 < total();
       nextBox.hidden = !hasNext;
       if (hasNext) renderInto(nextSlot, state.index + 1, { thumb: true });
@@ -1502,10 +1582,12 @@ function presenterView() {
       notesText.classList.toggle("empty", !slide?.notes);
       notesText.scrollTop = 0;
       counter.textContent = `${state.index + 1} / ${total()}`;
+      stepLabel.textContent = stepCount() ? t("stepOf", { n: state.step, total: stepCount() }) : "";
+      stepLabel.hidden = !stepCount();
       title.textContent = state.deck.title || t("slides");
       document.title = `${t("presenter")} · ${state.deck.title || t("slides")}`;
-      prevButton.disabled = state.index === 0;
-      nextButton.disabled = !hasNext;
+      prevButton.disabled = atStart();
+      nextButton.disabled = atEnd();
     },
   };
 }
@@ -1644,7 +1726,7 @@ function measureDeck(hosts, results, order, slides) {
     else if (measured.issues.some((item) => item.code === "overflow" || item.code === "clipped")) status = "overflow";
     else if (issues.some((item) => item.level === "error")) status = "error";
     else if (issues.length) status = "warning";
-    results.push({ id, index: index + 1, file: `project/slides/${id}.html`, title: slide?.title || id, status, notes: Boolean(slide?.notes), issues, marks: measured.marks, safe: measured.safe });
+    results.push({ id, index: index + 1, file: `project/slides/${id}.html`, title: slide?.title || id, status, notes: Boolean(slide?.notes), steps: slide?.steps || 0, issues, marks: measured.marks, safe: measured.safe });
   });
 }
 
@@ -1746,12 +1828,14 @@ function onDataChanged({ deckChanged, orderChanged, changedSlides, shownId }) {
   }
   if (state.deckStatus === "ok" && total()) {
     const keep = state.pendingId ?? shownId ?? currentId();
+    const keepStep = state.pendingId != null ? state.pendingStep : state.step;
     state.pendingId = null;
+    state.pendingStep = 0;
     const at = keep ? state.deck.order.indexOf(keep) : -1;
     state.index = at >= 0 ? at : Math.min(state.index, total() - 1);
-    if (!CHECK && hashId() !== currentId()) {
-      history.replaceState(null, "", `${location.pathname}${location.search}#${encodeURIComponent(currentId())}`);
-    }
+    // A step belongs to its slide: a slide that took the place of a removed one starts at step 0.
+    state.step = at >= 0 ? Math.min(keepStep, stepCount()) : 0;
+    if (!CHECK) syncHash();
   }
   if (CHECK) {
     runCheck();
