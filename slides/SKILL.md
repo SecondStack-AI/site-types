@@ -1,4 +1,4 @@
-# Slides 1.0.0
+# Slides 1.1.0
 
 A Slides site is a presentation. The viewer is part of the site type: it shows each slide in a 16:9 frame, with keyboard and touch navigation, an overview, a presenter window with notes and a timer, fullscreen, light and dark themes and print to PDF. You write only the deck data: one JSON file and one HTML fragment per slide. Do not write `index.html`, CSS files or JavaScript.
 
@@ -71,6 +71,7 @@ A slide file holds exactly one `<section>`. An optional last child `<aside>` hol
 - Use the theme colors in inline SVG and styles through `var(--accent)`, `var(--foreground)`, `var(--muted)`, `var(--surface)` and `var(--border)`, so the slide works in both themes.
 - A `<style>` element inside the section applies only to that slide, and its rules win over the built-in styles. Prefer the layouts and building blocks above.
 - CSS animations and transitions are allowed; they replay each time the slide is shown. Write the base style as the end state and animate only from the start (`@keyframes x { from { opacity: 0 } }`): the overview, the presenter's preview, print and check mode show slides without animation.
+- Builds reveal parts of a slide one click at a time. Use them in decks that someone presents live, so the speaker can talk through a list or a diagram point by point; leave them out of decks that people mostly read on their own. Add `data-step="1"`, `data-step="2"` and so on to the elements to reveal; elements with the same number appear together. A hidden step keeps its space and fades in; to change the effect, style `[data-step-hidden]` (a step not shown yet) and the `transition` of `[data-step]` in the slide's `<style>`; inside SVG, keep waiting steps `visibility: hidden`, or screen readers can read them early. The overview, print and check mode show every step, and check mode reports `steps` per slide.
 - Relative paths are relative to `project/`: write `src="assets/chart.png"` for `project/assets/chart.png`. To replace an image, save the new one under a new file name and update the slide; viewers that already have the deck open keep showing a file whose name did not change.
 - Slide HTML is shown in several places at once (stage, overview, presenter, print, check), so it must be plain markup; anything interactive goes into an app page (see Interactive slides). The viewer sanitizes slide HTML:
   - `<script>`, `on*` attributes, `javascript:` URLs, forms, `object`, `embed`, SVG animation, `base` and `meta` are removed. Draw charts and diagrams as inline SVG or images.
@@ -92,7 +93,7 @@ Use an app page for anything that reacts: a poll, a form, a quiz, a small game, 
 
 ## Build a deck
 
-1. Call `site_types` with `name="slides"`. Use the exact `type` it reports, for example `slides@1.0.0`, in every call below.
+1. Call `site_types` with `name="slides"`. Use the exact `type` it reports, for example `slides@1.1.0`, in every call below.
 2. Plan the deck: the story, the sections and the slide ids, one idea per slide. Start with a `title` slide and end with a closing slide.
 3. Write `project/deck.json` with the complete `order` first, then the slide files one by one. The viewer shows a placeholder for each listed slide whose file does not exist yet and fills it when the file appears, so you can publish early and keep writing.
 4. Preview and check (below), fix every error, then publish.
@@ -101,7 +102,7 @@ Use an app page for anything that reacts: a poll, a form, a quiz, a small game, 
 
 The workspace cannot open the published site. Check the deck locally with the viewer package:
 
-1. Call `import_site` with `type="slides@1.0.0"` and a new directory, for example `/workspace/sites/<name>-preview/`. It contains `index.html` and `_type/`.
+1. Call `import_site` with `type="slides@1.1.0"` and a new directory, for example `/workspace/sites/<name>-preview/`. It contains `index.html` and `_type/`.
 2. Copy the deck data into it, replacing any earlier copy, so deleted files do not linger: `rm -rf /workspace/sites/<name>-preview/project && cp -r /workspace/sites/<name>/project /workspace/sites/<name>-preview/`. Repeat after each change. Never publish the preview directory.
 3. Serve it: `python3 -m http.server 8765 --bind 127.0.0.1 --directory /workspace/sites/<name>-preview` in the background.
 4. Open `http://127.0.0.1:8765/?check=1` in the workspace browser. Check mode lists every slide with its issues and outlines overflowing elements. When `document.documentElement.dataset.slidesCheck` is `"done"`, the full report is the JSON text of `#slides-check-report` and the `[slides-check]` console line. `ok` is `false` while any error remains. While slides are still missing, the browser console also shows 404 errors for their files; that is expected.
@@ -109,7 +110,7 @@ The workspace cannot open the published site. Check the deck locally with the vi
 
 ## Publish
 
-- Publish the data directory, `/workspace/sites/<name>/`, which holds `project/` and optionally `_spot.json`, with `publish_site(path=..., site=<name>, type="slides@1.0.0")`. It needs no `index.html`; never include the preview files. Leave `type_target` empty.
+- Publish the data directory, `/workspace/sites/<name>/`, which holds `project/` and optionally `_spot.json`, with `publish_site(path=..., site=<name>, type="slides@1.1.0")`. It needs no `index.html`; never include the preview files. Leave `type_target` empty.
 - Only files under `project/` and `_spot.json` belong in it. Publishing refuses other files and names the first offending path; every `.json` file must be valid JSON.
 - An edit of an existing deck starts with `import_site(site=<name>, path=<empty directory>)`, which reports the exact type to publish with. Edit, check and publish with that `type`. A pin mismatch error (409) means the site now pins another version: import it again and redo the edit there.
 - Give the user the link with one sentence on what the deck covers. The presenter view opens with `S`, the overview with `O`, fullscreen with `F`; browser print saves a PDF with one page per slide.
