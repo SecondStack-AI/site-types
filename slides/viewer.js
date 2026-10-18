@@ -171,7 +171,7 @@ function parseHash() {
   } catch {
     return { id: null, step: 0 };
   }
-  const match = /^(.*?)(?:\.(\d{1,3}))?$/.exec(raw);
+  const match = /^([\s\S]*?)(?:\.(\d{1,3}))?$/.exec(raw);
   return { id: match[1] || null, step: match[2] ? Number(match[2]) : 0 };
 }
 const initialHash = parseHash();
@@ -579,11 +579,12 @@ const STEP_RE = /^\s*[1-9]\d{0,2}\s*$/;
 
 // Builds: data-step="N" puts an element in step N, and elements with the same number are revealed
 // together. Numbers only order the steps, so data-step 2 and 5 are steps 1 and 2. An element whose
-// data-step is empty or not a number is always shown. Only the new attribute opts in: markup that
-// 1.0.0 decks may already use, such as a "step" class, must keep rendering as before.
-function slideSteps(root) {
+// data-step is empty or not a number is always shown, and so is the slide's own section: `section` is
+// searched, not included. Only the new attribute opts in: markup that 1.0.0 decks may already use,
+// such as a "step" class, must keep rendering as before.
+function slideSteps(section) {
   const numbered = [];
-  for (const el of root.querySelectorAll("[data-step]")) {
+  for (const el of section.querySelectorAll("[data-step]")) {
     const raw = el.getAttribute("data-step");
     if (STEP_RE.test(raw)) numbered.push({ el, n: Number(raw) });
   }
@@ -596,13 +597,29 @@ function slideSteps(root) {
 // it as visible. Returns the elements this call revealed.
 function applySteps(frame, step) {
   const revealed = [];
-  for (const item of slideSteps(frame).items) {
+  const section = frame.querySelector(":scope > section");
+  if (!section) return revealed;
+  for (const item of slideSteps(section).items) {
     const hidden = item.step > step;
     if (!hidden && item.el.hasAttribute("data-step-hidden")) revealed.push(item.el);
     item.el.toggleAttribute("data-step-hidden", hidden);
     item.el.toggleAttribute("inert", hidden);
   }
   return revealed;
+}
+
+// What a step revealed, for the live region: the text of the outermost revealed elements, without the
+// nested steps that are still waiting.
+function revealedText(elements) {
+  return elements
+    .filter((el) => !elements.some((other) => other !== el && other.contains(el)))
+    .map((el) => {
+      const copy = el.cloneNode(true);
+      for (const waiting of copy.querySelectorAll("[data-step-hidden]")) waiting.remove();
+      return copy.textContent.replace(/\s+/g, " ").trim();
+    })
+    .filter(Boolean)
+    .join(" ");
 }
 
 function parseSlide(id, text) {
@@ -659,6 +676,9 @@ function parseSlide(id, text) {
   const invalidSteps = [...cleanSection.querySelectorAll("[data-step]")].filter((el) => !STEP_RE.test(el.getAttribute("data-step")));
   if (invalidSteps.length) {
     issues.push(issue("warning", "step-invalid", `data-step must be a whole number from 1 to 999; ${invalidSteps.length} element(s) without one are always shown`));
+  }
+  if (cleanSection.hasAttribute("data-step")) {
+    issues.push(issue("warning", "step-on-section", "data-step on the <section> is ignored; put it on elements inside the slide"));
   }
   const titleSource = (cleanSection.querySelector("h1, h2, h3") || cleanSection).cloneNode(true);
   for (const br of titleSource.querySelectorAll("br")) br.replaceWith(" ");
@@ -1480,7 +1500,7 @@ function audienceView() {
       if (moved || full !== false) renderInto({ slot, host }, state.index, { step: state.step });
       else if (stepped) {
         // Screen readers do not announce content that becomes visible, so a step says what it revealed.
-        const revealed = showStep(host).map((el) => el.textContent.replace(/\s+/g, " ").trim()).filter(Boolean).join(" ");
+        const revealed = revealedText(showStep(host));
         live.textContent = (stepped === "forward" && revealed) || t("stepOf", { n: state.step, total: stepCount() });
       }
       if (moved) {

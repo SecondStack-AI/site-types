@@ -201,7 +201,7 @@ function compareReport(report, deck, version) {
   const notes = deck.expect.notes || {};
   const steps = deck.expect.steps || {};
   for (const slide of report.slides) {
-    if ("steps" in slide && slide.steps !== (steps[slide.id] || 0)) problems.push(`${slide.file}: check mode reports ${slide.steps} steps, check.json says ${steps[slide.id] || 0}`);
+    if ((slide.steps || 0) !== (steps[slide.id] || 0)) problems.push(`${slide.file}: check mode reports ${slide.steps ?? "no"} steps, check.json says ${steps[slide.id] || 0}`);
     compareIssues(slide.file, slide.issues, warnings[slide.id] || [], errors[slide.id] || [], problems);
     if (slide.notes !== slide.id in notes) problems.push(`${slide.file}: check mode says notes ${slide.notes ? "present" : "absent"}, check.json says ${slide.id in notes ? "present" : "absent"}`);
   }
@@ -452,14 +452,19 @@ async function interact(context, site, deck, steps, problems) {
       break;
     }
     const step = await page.evaluate(() => {
-      const items = [...document.querySelector(".stage .slide-host").shadowRoot.querySelectorAll("[data-step]")];
+      const root = document.querySelector(".stage .slide-host").shadowRoot;
+      const items = [...root.querySelectorAll("[data-step]")];
       return {
+        sectionHidden: Boolean(root.querySelector(".frame > section")?.hasAttribute("data-step-hidden")),
         live: document.querySelector("#app [aria-live]")?.textContent ?? "",
         hiddenNotInert: items.filter((el) => el.hasAttribute("data-step-hidden") && !el.hasAttribute("inert")).length,
         shownInert: items.filter((el) => !el.hasAttribute("data-step-hidden") && el.hasAttribute("inert")).length,
       };
     });
-    if (state.hash.includes(".") && (!step.live || step.live.startsWith("Slide "))) problems.push(`→ to #${state.hash}: the live region says ${JSON.stringify(step.live)}, not what the step revealed`);
+    const announce = deck.expect.announce?.[state.hash];
+    if (announce !== undefined && step.live !== announce) problems.push(`→ to #${state.hash}: the live region says ${JSON.stringify(step.live)}, expected ${JSON.stringify(announce)}`);
+    else if (state.hash.includes(".") && (!step.live || step.live.startsWith("Slide "))) problems.push(`→ to #${state.hash}: the live region says ${JSON.stringify(step.live)}, not what the step revealed`);
+    if (step.sectionHidden) problems.push(`#${state.hash}: the slide's own section is hidden as a step`);
     if (step.hiddenNotInert || step.shownInert) problems.push(`#${state.hash}: ${step.hiddenNotInert} waiting step(s) not inert, ${step.shownInert} shown step(s) inert`);
   }
   await page.keyboard.press("o");
@@ -475,6 +480,13 @@ async function interact(context, site, deck, steps, problems) {
     problems.push("O did not open the overview");
   }
   await closePage(page);
+  // A malformed fragment, such as a copied link with a line break, still opens the deck on a fresh load.
+  for (const junk of ["%0A", "%0D"]) {
+    const fresh = await context.newPage();
+    await fresh.goto(`${site.url}/#${deck.order[0]}${junk}`);
+    if (!(await hashIs(fresh, deck.order[0]))) problems.push(`#${deck.order[0]}${junk} did not open the deck: hash is #${JSON.stringify(await hashOf(fresh))}`);
+    await closePage(fresh);
+  }
 }
 
 // Activates every link, button and focusable element on the stage, so a handler or URL that survived
@@ -631,6 +643,11 @@ async function main() {
         baseline ? runBaseline(browser, deck, baseline.packageDir) : null,
       ]);
       const visual = { identical: 0, withinThreshold: [], accepted: [], failed: [], new: [] };
+      // A screenshot the baseline has and the candidate lacks is lost coverage, such as step states of a
+      // build that stopped working.
+      for (const key of baseShots?.keys() ?? []) {
+        if (!result.shots.has(key)) result.problems.push(`${key} exists in ${baselineRef} but not in the candidate`);
+      }
       for (const [key, shot] of result.shots) {
         if (opts.save) await saveShot(path.join(OUT_DIR, "shots", `${key}.png`), shot);
         if (!baseShots) continue;

@@ -11,10 +11,10 @@
 | `apps` | same-origin and external app frames, with and without posters |
 | `notes` | presenter notes |
 | `checkmode` | check mode's own detector: one slide that fits, one that overflows the safe area, one whose `section` clips |
-| `builds` | click-to-reveal steps: `data-step`, equal numbers together, SVG steps, an author's own effect, empty and invalid values, and a `step` class from a deck's own markup that must stay a non-build (steps 0, stage identical to 1.0.0) |
+| `builds` | click-to-reveal steps: `data-step`, equal numbers together, SVG steps, an author's own effect, empty and invalid values, a `data-step` on the section (ignored), nested steps, and a `step` class from a deck's own markup that must stay a non-build (steps 0, stage identical to 1.0.0) |
 | `sanitizer` | payloads that must stay inert: script, `on*` (including handlers that fire without a click: `onerror` on a failing image, animation and transition events, `ontoggle`, `autofocus` with `onfocus`), `javascript:` and `data:` URLs (links and frames), `srcdoc`, forms, object/embed, SVG animation, base/meta/link, CSS `@import`, `url()` and escapes, mutation XSS |
 
-Besides check mode and the screenshots, every deck is driven once: → through the audience view, every step included, with the counter checked, O for the overview and Escape to close it; the presenter window follows the audience window and the audience follows the presenter back, with the notes read on the way; and each scheme's PDF is printed and its pages counted.
+Besides check mode and the screenshots, every deck is driven once: → through the audience view, every step included, with the counter checked, O for the overview and Escape to close it, a step announcing what it revealed and waiting steps inert, and a link whose fragment ends in a line break still opening the deck; the presenter window follows the audience window and the audience follows the presenter back, with the notes read on the way; and each scheme's PDF is printed and its pages counted.
 
 Stage screenshots cover every step of a slide. The last state, with every step shown, has the key `<deck>/<slide>/stage/<scheme>`, which a viewer without builds also produces, so a revealed slide is compared with the previous release; earlier steps are compared once the baseline has builds too.
 
@@ -44,6 +44,7 @@ Optional, beside `project/`. Without it a deck must produce no issues and no not
 - `errors` lists the error codes a slide must cause: an image whose `src` the sanitizer removed cannot load, and the `checkmode` slides must be reported. Ordinary decks have none.
 - `notes` lists every slide with notes and the text the presenter window shows.
 - `steps` lists every slide with builds and its step count; every other slide must have none, and listing one with 0 makes that explicit.
+- `announce` maps a step state (`list.1`) to the exact text the live region must announce after → reaches it.
 - `navigate` walks every step with → in the presenter window and back with ← in the audience window, checks that the other window follows and that the presenter shows "Step n of N", and checks that each step's deep link (`#id.2`) renders as the stage did when it walked there.
 - `activate` clicks, focuses and hovers every interactive element on the stage.
 

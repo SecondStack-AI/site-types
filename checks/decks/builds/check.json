@@ -1,6 +1,12 @@
 {
   "navigate": true,
-  "steps": { "list": 3, "groups": 2, "diagram": 2, "custom-effect": 2, "invalid": 1, "step-class": 0, "closing": 1 },
-  "warnings": { "invalid": ["step-invalid"] },
+  "steps": { "list": 3, "groups": 2, "diagram": 2, "custom-effect": 2, "invalid": 1, "step-class": 0, "section-step": 1, "nested": 2, "closing": 1 },
+  "warnings": { "invalid": ["step-invalid"], "section-step": ["step-on-section"] },
+  "announce": {
+    "list.1": "First, the problem",
+    "diagram.1": "Viewer",
+    "nested.1": "The outer step is revealed first",
+    "nested.2": "and the inner one second."
+  },
   "notes": { "list": "Three clicks before the next slide." }
 }
