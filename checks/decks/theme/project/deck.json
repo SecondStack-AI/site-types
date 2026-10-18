@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "title": "Theme",
+  "lang": "de",
+  "order": ["cover", "tokens", "text", "accent", "light-on-dark", "dark-slide", "table"],
+  "theme": {
+    "scheme": "dark",
+    "light": {
+      "background": "#fbf7f0",
+      "surface": "#f1e8d8",
+      "foreground": "#2b2118",
+      "muted": "#7a6a58",
+      "accent": "#b8480f",
+      "onAccent": "#fffaf2",
+      "border": "#e0d2bb"
+    },
+    "dark": {
+      "background": "rgb(20 24 22)",
+      "surface": "oklch(0.27 0.02 160)",
+      "foreground": "hsl(60 20% 94%)",
+      "muted": "#9fb3a6",
+      "accent": "#7ee0a9",
+      "onAccent": "#0d1a12",
+      "border": "#34463b"
+    },
+    "fonts": {
+      "display": { "family": "Corpus Display", "faces": [{ "src": "assets/fonts/corpus-display.woff2", "weight": "100 800" }] },
+      "body": { "family": "Corpus Sans", "href": "https://fonts.googleapis.com/css2?family=Corpus+Sans:ital,wght@1,100..900&display=swap" },
+      "mono": { "family": "Corpus Mono", "faces": [{ "src": "https://fonts.gstatic.com/s/corpus/inter-latin-standard-normal.woff2", "weight": "100 900" }] }
+    }
+  }
+}

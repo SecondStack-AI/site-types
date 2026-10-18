@@ -1,0 +1,11 @@
+<section>
+  <style>
+    @keyframes draw { from { stroke-dashoffset: 1200; } }
+    .line { stroke-dasharray: 1200; stroke-dashoffset: 0; animation: draw 1.2s ease-out; }
+  </style>
+  <h2>SVG drawn with a CSS animation</h2>
+  <svg viewBox="0 0 1000 320" width="1500" height="480" role="img" aria-label="Line chart">
+    <path d="M20 300 H980" stroke="var(--border)" stroke-width="3" fill="none"/>
+    <path class="line" d="M20 280 L200 220 L380 240 L560 140 L740 160 L960 40" stroke="var(--accent)" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</section>

@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "title": "Check mode",
+  "lang": "en",
+  "order": ["fits", "overflow", "clipped"]
+}

@@ -1,0 +1,14 @@
+<section>
+  <style>
+    @layer base, emphasis;
+    @layer emphasis { .note { color: var(--accent); font-weight: 650; } }
+    @layer base { .note { color: var(--muted); } }
+    @media (min-width: 1000px) { .wide { letter-spacing: 0.04em; } }
+    @supports (display: grid) { .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; } }
+  </style>
+  <h2>Cascade layers, media and supports rules</h2>
+  <div class="grid">
+    <p class="note">The emphasis layer wins over the base layer.</p>
+    <p class="wide">The frame is 1920 px wide, so the media rule applies.</p>
+  </div>
+</section>

@@ -1,0 +1,6 @@
+<section>
+  <h2>Inline script</h2>
+  <script>top.__exec_script = 1; fetch("/api/probe?script");</script>
+  <noscript><img src="assets/ok.svg" onload="top.__exec_noscript = 1"></noscript>
+  <p>Script and noscript elements are removed.</p>
+</section>

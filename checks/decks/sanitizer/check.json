@@ -1,0 +1,28 @@
+{
+  "activate": true,
+  "deckWarnings": ["font-href", "font-face-src"],
+  "warnings": {
+    "inline-script": [{"code": "unsafe-removed", "removed": ["<script>", "<noscript>"]}],
+    "event-handlers": [{"code": "unsafe-removed", "removed": ["onload", "onerror", "onclick", "onfocus", "onmouseover", "autofocus", "onanimationstart", "onanimationend", "ontransitionrun", "ontransitionend", "ontoggle"]}],
+    "javascript-urls": [{"code": "unsafe-removed", "removed": ["href", "xlink:href"]}],
+    "srcdoc": [{"code": "unsafe-removed", "removed": ["srcdoc"]}],
+    "data-urls": [{"code": "unsafe-removed", "removed": ["src", "href"]}],
+    "forms": [{"code": "unsafe-removed", "removed": ["<form>", "formaction"]}],
+    "object-embed": [{"code": "unsafe-removed", "removed": ["<object>", "<embed>"]}],
+    "svg-animation": [{"code": "unsafe-removed", "removed": ["<animate>", "<set>", "<animateTransform>"]}],
+    "base-meta-link": [{"code": "unsafe-removed", "removed": ["<base>", "<meta>", "<link>"]}],
+    "css-import": ["css-import-removed"],
+    "css-urls": [{"code": "css-url-removed", "count": 3}],
+    "css-escapes": [
+      {"code": "unsafe-removed", "removed": ["style declaration", "fill"]},
+      {"code": "css-url-removed", "count": 1}
+    ],
+    "inline-style": [{"code": "unsafe-removed", "removed": ["style declaration"]}],
+    "resources": [{"code": "unsafe-removed", "removed": ["src", "srcset", "fill", "filter", "href", "poster"]}],
+    "mutation-xss": [{"code": "unsafe-removed", "removed": ["onload", "<mglyph>"]}]
+  },
+  "errors": {
+    "event-handlers": ["asset-missing"],
+    "resources": ["asset-missing", "asset-missing"]
+  }
+}

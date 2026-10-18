@@ -1,0 +1,6 @@
+{
+  "errors": {
+    "overflow": ["overflow"],
+    "clipped": ["clipped", "overflow"]
+  }
+}
