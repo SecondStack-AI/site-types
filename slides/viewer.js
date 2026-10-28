@@ -1351,7 +1351,7 @@ function onKeyDown(event) {
     go(total() - 1, { step: stepCount(total() - 1) });
   } else if ((key === "o" || key === "g") && !EMBED) {
     openOverview();
-  } else if (key === "f") {
+  } else if (key === "f" && !EMBED) {
     toggleFullscreen();
   } else if (key === "s" || key === "p") {
     if (!PRESENTER) openPresenter();
@@ -2191,15 +2191,10 @@ const HOST_COMMANDS = {
     if (!state.deck.order.includes(id)) return hostError("slide-unknown", `There is no slide "${id}" in this deck`);
     goToId(id);
   },
-  // Fullscreen needs a user activation, which a cross-origin frame does not get from the host's click;
-  // the host delegates it: postMessage(message, { targetOrigin, delegate: "fullscreen" }).
-  present() {
-    if (document.fullscreenElement) return;
-    if (!document.documentElement.requestFullscreen) return hostError("fullscreen-denied", "This browser cannot show a page in fullscreen");
-    document.documentElement.requestFullscreen().catch((error) => hostError("fullscreen-denied", String(error?.message || error)));
-  },
-  presenter() {
-    if (!openPresenter()) hostError("popup-blocked", "The browser blocked the presenter window");
+  // The host makes this frame fullscreen itself; presenting is the stage alone, navigation unchanged.
+  present({ on }) {
+    if (typeof on !== "boolean") return hostError("command-invalid", 'present needs "on": true or false');
+    app.classList.toggle("presenting", on);
   },
   print() {
     window.print();

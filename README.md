@@ -66,17 +66,18 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 | `ready` | `contract`, `siteType` (`name`, `version`), `outline`; sent again after the viewer reloads |
 | `outline` | `outline`: `title`, `theme` (`preset`, `scheme`), `slides` (`id`, `title`, `section` title or `null`, `missing`); after any change |
 | `slide` | `id`, `index` of the current slide |
-| `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid`, `fullscreen-denied`, `popup-blocked` |
+| `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid` |
 
 | Host → viewer | Fields |
 |---|---|
 | `goto` | `id` |
-| `present` | Fullscreen on the viewer's document. Send it in a click handler with `postMessage(message, { targetOrigin, delegate: "fullscreen" })` and frame with `allow="fullscreen"`: a cross-origin frame gets no activation from the host's click otherwise. |
-| `presenter` | Opens the presenter window. Browsers block popups from a frame without its own click; a host can instead open `https://<site>/?presenter=1#<slide id>` itself in its click handler, without `noopener`, and that window finds the embedded viewer. |
+| `present` | `on`: `true` shows the stage alone, with keyboard and click navigation and builds; `false` brings the strip back. The host makes the frame fullscreen itself in its click handler (`iframe.requestFullscreen()`, then `iframe.focus()` so the keys reach the deck), sends `on: true`, and sends `on: false` when `fullscreenchange` leaves fullscreen. |
 | `print` | The print dialog (save as PDF) |
 | `scheme` | `scheme`: `light` or `dark` |
 
-Unknown types and messages of another `slides` major are ignored.
+Unknown types and messages of another `slides` major are ignored. In embed mode the viewer's own keys for fullscreen, overview and help are off.
+
+The host opens the presenter window itself, in its click handler: `window.open("https://<site>/?presenter=1#<slide id>")`, without `noopener`. That window finds the embedded viewer through its opener's frames, and the two follow each other through window references, since storage partitioning keeps them on different `BroadcastChannel`s.
 
 ## Release check
 

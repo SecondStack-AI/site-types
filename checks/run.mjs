@@ -671,9 +671,6 @@ async function embedProtocol(browser, deck, version, problems) {
       if (outline.slides.find((slide) => slide.id === missingId)?.section !== "Results" || outline.slides[0].section !== null) fail(`outline sections are ${JSON.stringify(outline.slides.map((slide) => slide.section))}`);
     }
     await waitMessage("the first slide message", isSlide(0));
-    // Before anything is clicked in the viewer frame, which would give the frame its own activation.
-    await page.evaluate(() => window.send({ type: "present" }));
-    await waitMessage("present without a click", (message) => message.type === "error" && message.code === "fullscreen-denied");
 
     const layout = await viewer.evaluate(() => ({
       toolbar: Boolean(document.querySelector(".toolbar")),
@@ -689,6 +686,8 @@ async function embedProtocol(browser, deck, version, problems) {
     await waitMessage("goto to an unknown slide", (message) => message.type === "error" && message.code === "slide-unknown");
     await page.evaluate(() => window.send({ type: "scheme", scheme: "blue" }));
     await waitMessage("an invalid scheme", (message) => message.type === "error" && message.code === "command-invalid");
+    await page.evaluate(() => window.send({ type: "present", on: "yes" }));
+    await waitMessage("present without a boolean", (message) => message.type === "error" && message.code === "command-invalid");
     await page.evaluate((site) => {
       window.send({ type: "no-such-command" });
       document.getElementById("viewer").contentWindow.postMessage({ slides: 2, type: "goto", id: "cover" }, site);
@@ -723,33 +722,46 @@ async function embedProtocol(browser, deck, version, problems) {
     await writeFile(missingFile, missingText);
     await waitMessage(`${missingId} published`, (message) => message.type === "outline" && message.outline.slides.every((slide) => !slide.missing), 20000);
 
+    // Present: the host's fullscreen frame shows the stage alone and keeps keyboard navigation; leaving
+    // fullscreen brings the strip back.
+    const presentLayout = () => viewer.evaluate(() => ({
+      strip: getComputedStyle(document.querySelector(".strip")).display,
+      stageLeft: document.querySelector(".stage").getBoundingClientRect().left,
+    }));
     await page.click("#present");
-    if (!(await viewer.waitForFunction(() => document.fullscreenElement === document.documentElement, null, { timeout: 5000 }).then(() => true, () => false))) fail("present from a click in the host did not make the viewer fullscreen");
-    else if ((await viewer.evaluate(() => getComputedStyle(document.querySelector(".strip")).display)) !== "none") fail("the strip stays visible in fullscreen");
-    await viewer.evaluate(() => document.exitFullscreen());
+    if (!(await page.waitForFunction(() => document.fullscreenElement?.id === "viewer", null, { timeout: 5000 }).then(() => true, () => false))) fail("the host page could not make the viewer frame fullscreen");
+    if (!(await viewer.waitForFunction(() => document.getElementById("app").classList.contains("presenting"), null, { timeout: 5000 }).then(() => true, () => false))) fail("present on: the viewer did not switch to presenting");
+    else {
+      const layout = await presentLayout();
+      if (layout.strip !== "none" || layout.stageLeft !== 0) fail(`presenting shows the strip (${layout.strip}) or offsets the stage by ${layout.stageLeft}px`);
+    }
+    await page.keyboard.press("ArrowRight");
+    await waitMessage("→ while presenting", isSlide(3));
+    await page.keyboard.press("ArrowLeft");
+    await waitMessage("← while presenting", isSlide(2));
+    await page.evaluate(() => document.exitFullscreen());
+    if (!(await viewer.waitForFunction(() => !document.getElementById("app").classList.contains("presenting"), null, { timeout: 5000 }).then(() => true, () => false))) fail("present on: false did not end presenting");
+    else if ((await presentLayout()).strip === "none") fail("the strip stays hidden after presenting");
 
     await page.evaluate(() => window.send({ type: "print" }));
     await sleep(300);
     const pages = await viewer.locator("#print-root .print-page").count();
     if (pages !== order.length) fail(`print built ${pages} pages for ${order.length} slides`);
 
-    // The presenter window the viewer opens, and one the host page opens itself, follow the embedded
-    // viewer and lead it. A second viewer of the deck would answer the presenter too.
+    // The presenter window the host page opens follows the embedded viewer and leads it. A second viewer
+    // of the deck would answer the presenter too.
     await page.evaluate(() => document.getElementById("wrong").remove());
-    for (const [button, startIndex, label] of [["#presenter", 2, "the presenter command"], ["#open-presenter", 3, "a presenter window the host opened"]]) {
-      const [presenter] = await Promise.all([context.waitForEvent("page"), page.click(button)]);
-      await presenter.waitForFunction(() => !document.getElementById("app").hasAttribute("aria-busy"));
-      if (!(await textIs(presenter, ".pv-counter", `${startIndex + 1} / ${order.length}`))) fail(`${label}: the presenter shows ${await presenter.locator(".pv-counter").textContent()}, expected slide ${startIndex + 1}`);
-      const target = startIndex === 2 ? 3 : 2;
-      await page.evaluate((id) => window.send({ type: "goto", id }), order[target]);
-      await waitMessage(`${label}: goto`, isSlide(target));
-      if (!(await textIs(presenter, ".pv-counter", `${target + 1} / ${order.length}`))) fail(`${label}: the presenter did not follow the viewer to slide ${target + 1}`);
-      await presenter.keyboard.press("ArrowLeft");
-      await waitMessage(`${label}: ← in the presenter`, isSlide(target - 1));
-      await closePage(presenter);
-      await page.evaluate((id) => window.send({ type: "goto", id }), order[3]);
-      await waitMessage(`${label}: back to the last slide`, isSlide(3));
-    }
+    await page.evaluate((id) => window.send({ type: "goto", id }), order[3]);
+    await waitMessage("goto before the presenter", isSlide(3));
+    const [presenter] = await Promise.all([context.waitForEvent("page"), page.click("#open-presenter")]);
+    await presenter.waitForFunction(() => !document.getElementById("app").hasAttribute("aria-busy"));
+    if (!(await textIs(presenter, ".pv-counter", `4 / ${order.length}`))) fail(`the presenter window shows ${await presenter.locator(".pv-counter").textContent()}, not the viewer's slide 4`);
+    await page.evaluate((id) => window.send({ type: "goto", id }), order[2]);
+    await waitMessage("goto with the presenter open", isSlide(2));
+    if (!(await textIs(presenter, ".pv-counter", `3 / ${order.length}`))) fail("the presenter window did not follow the viewer to slide 3");
+    await presenter.keyboard.press("ArrowLeft");
+    await waitMessage("← in the presenter window", isSlide(1));
+    await closePage(presenter);
     for (const frame of page.frames()) {
       const keys = await frame.evaluate((prefix) => Object.keys(window).filter((key) => key.startsWith(prefix)), MARKER_PREFIX).catch(() => []);
       for (const key of keys) record.markers.push(`${key} set in ${frame.url()}`);
