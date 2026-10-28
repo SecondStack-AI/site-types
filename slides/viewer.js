@@ -1,12 +1,19 @@
 // Slides viewer for the `slides` site type. Reads /project/deck.json and /project/slides/<id>.html,
 // sanitizes each slide with an allowlist and renders it inline in its own shadow root, and keeps the
 // deck fresh through the _spot_deploys event or bounded polling while slides are still missing.
+// The package's /_type/slides.json lists the themes a deck picks with theme.preset; ?embed=1 shows
+// the stage and a slide strip to a host page that drives it with postMessage (the host protocol).
 
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.1.0"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.2.0"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
+// The major of slides.json and of the host protocol; a host supports exactly one.
+const CONTRACT = 1;
+const TYPE_ROOT = "/_type/";
+const THEME_ID_RE = /^[a-z0-9-]{1,32}$/;
+const UNICODE_RANGE_RE = /^\s*U\+[0-9a-f?]{1,6}(-[0-9a-f]{1,6})?(\s*,\s*U\+[0-9a-f?]{1,6}(-[0-9a-f]{1,6})?)*\s*$/i;
 const W = 1920;
 const H = 1080;
 const DATA_ROOT = "/project/";
@@ -18,7 +25,7 @@ const NO_FOOTER_LAYOUTS = new Set(["title", "section", "image", "blank"]);
 const TOKENS = ["background", "surface", "foreground", "muted", "accent", "onAccent", "border"];
 const FONT_ROLES = ["display", "body", "mono"];
 const DECK_KEYS = new Set(["v", "title", "lang", "order", "sections", "theme"]);
-const THEME_KEYS = new Set(["scheme", "light", "dark", "fonts"]);
+const THEME_KEYS = new Set(["preset", "scheme", "light", "dark", "fonts"]);
 const POLL_MIN_MS = 2000;
 const POLL_MAX_MS = 15000;
 const FETCH_CONCURRENCY = 6;
@@ -179,7 +186,21 @@ const initialHash = parseHash();
 const params = new URLSearchParams(location.search);
 const CHECK = params.get("check") === "1";
 const PRESENTER = params.get("presenter") === "1";
+const EMBED = params.get("embed") === "1" && !CHECK && !PRESENTER;
+const HOST_ORIGIN = EMBED ? hostOrigin(params.get("host")) : null;
 const app = document.getElementById("app");
+
+// The host parameter must be exactly an http(s) origin: it is the only origin the viewer talks to.
+function hostOrigin(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  return (url.protocol === "https:" || url.protocol === "http:") && url.origin === value ? value : null;
+}
+if (EMBED && !HOST_ORIGIN) console.error(`[slides] embed=1 needs host=<origin of the host page>, got ${JSON.stringify(params.get("host"))}; the host protocol is off`);
 document.documentElement.lang = UI_LANG;
 
 const state = {
@@ -209,7 +230,7 @@ function validColor(value) {
 
 function normalizeDeck(raw) {
   const issues = [];
-  const deck = { title: "", lang: null, order: [], sections: [], theme: { scheme: null, light: {}, dark: {}, fonts: {} } };
+  const deck = { title: "", lang: null, order: [], sections: [], theme: { preset: null, scheme: null, light: {}, dark: {}, fonts: {} } };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     issues.push(issue("error", "deck-not-object", "deck.json must be a JSON object"));
     return { deck, issues };
@@ -271,6 +292,10 @@ function normalizeDeck(raw) {
     } else {
       for (const key of Object.keys(theme)) {
         if (!THEME_KEYS.has(key)) issues.push(issue("warning", "theme-key-unknown", `Unknown theme key "${key}" is ignored`));
+      }
+      if (theme.preset != null) {
+        if (themes.has(theme.preset)) deck.theme.preset = theme.preset;
+        else issues.push(issue("error", "unknown-preset", `theme "preset" ${JSON.stringify(theme.preset)} is not a theme of this site type, so the deck shows "${defaultThemeId}"; known: ${[...themes.keys()].join(", ")}`));
       }
       if (theme.scheme != null) {
         if (theme.scheme === "light" || theme.scheme === "dark") deck.theme.scheme = theme.scheme;
@@ -335,12 +360,21 @@ function fontWeight(value, role, issues) {
   return "400";
 }
 
-function normalizeFont(role, spec, issues) {
+// A path inside the package, served under /_type/.
+function typeFileUrl(value) {
+  if (typeof value !== "string" || !value || /^[a-z][a-z0-9+.-]*:|^\/|\\/i.test(value)) return null;
+  const url = new URL(value, location.origin + TYPE_ROOT);
+  return url.origin === location.origin && url.pathname.startsWith(TYPE_ROOT) && !url.search && !url.hash ? url.pathname : null;
+}
+
+// Deck fonts load from project/ or Google Fonts; theme fonts (`fromType`) load from the package and
+// may split a family into unicode-range subsets.
+function normalizeFont(role, spec, issues, { fromType = false } = {}) {
   if (!spec || typeof spec !== "object" || typeof spec.family !== "string" || !spec.family.trim() || spec.family.length > 100) {
     issues.push(issue("warning", "font-family", `fonts.${role} needs a "family" string`));
     return null;
   }
-  const font = { family: spec.family.trim(), href: null, faces: [] };
+  const font = { family: spec.family.trim(), href: null, faces: [], fromType };
   if (spec.href != null) {
     if (fontStylesheetUrl(spec.href)) font.href = fontStylesheetUrl(spec.href);
     else issues.push(issue("warning", "font-href", `fonts.${role}.href must be a ${FONT_STYLESHEET_ORIGIN}/ stylesheet URL`));
@@ -350,20 +384,99 @@ function normalizeFont(role, spec, issues) {
       issues.push(issue("warning", "font-faces", `fonts.${role}.faces must be an array`));
     } else {
       for (const face of spec.faces) {
-        const src = fontFaceUrl(face?.src);
+        const src = fromType ? typeFileUrl(face?.src) : fontFaceUrl(face?.src);
         if (!src) {
-          issues.push(issue("warning", "font-face-src", `Each fonts.${role}.faces entry needs a "src" under project/ or on ${FONT_FILE_ORIGINS.join(" or ")}`));
+          issues.push(issue("warning", "font-face-src", fromType
+            ? `Each fonts.${role}.faces entry needs a "src" relative to the package root`
+            : `Each fonts.${role}.faces entry needs a "src" under project/ or on ${FONT_FILE_ORIGINS.join(" or ")}`));
           continue;
         }
-        font.faces.push({
-          src,
-          weight: fontWeight(face.weight, role, issues),
-          style: face.style === "italic" ? "italic" : "normal",
-        });
+        const entry = { src, weight: fontWeight(face.weight, role, issues), style: face.style === "italic" ? "italic" : "normal", unicodeRange: null };
+        if (fromType && face.unicodeRange != null) {
+          if (typeof face.unicodeRange === "string" && UNICODE_RANGE_RE.test(face.unicodeRange)) entry.unicodeRange = face.unicodeRange.trim();
+          else issues.push(issue("warning", "font-unicode-range", `fonts.${role}.faces unicodeRange ${JSON.stringify(face.unicodeRange)} is not a CSS unicode-range such as "U+0000-00FF, U+0131"`));
+        }
+        font.faces.push(entry);
       }
     }
   }
   return font;
+}
+
+// The package's themes, from /_type/slides.json. A fork replaces that file and its assets, not this
+// code. A problem in it is a package bug: check mode reports it as an error on every deck, and a theme
+// that fails to load is left out.
+const themes = new Map(); // id -> { id, scheme, light, dark, fonts, stylesheet }
+const themeSheets = new Map(); // id -> CSSStyleSheet
+const typeIssues = [];
+let defaultThemeId = null;
+let activeThemeId = null;
+
+function normalizeThemes(raw) {
+  const bad = (message) => typeIssues.push(issue("error", "slides-json-invalid", `_type/slides.json: ${message}`));
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return bad("must be a JSON object");
+  if (raw.contract !== CONTRACT) bad(`"contract" must be ${CONTRACT}, got ${JSON.stringify(raw.contract)}`);
+  if (!Array.isArray(raw.themes) || !raw.themes.length) return bad('"themes" must be a non-empty array');
+  raw.themes.forEach((entry, at) => {
+    const where = `themes[${at}]`;
+    if (!entry || typeof entry !== "object" || typeof entry.id !== "string" || !THEME_ID_RE.test(entry.id)) return bad(`${where}.id must be 1-32 lowercase letters, digits and hyphens`);
+    if (themes.has(entry.id)) return bad(`theme "${entry.id}" is listed twice`);
+    const theme = { id: entry.id, scheme: entry.scheme, light: {}, dark: {}, fonts: {}, stylesheet: null };
+    for (const key of ["title", "description"]) {
+      if (typeof entry[key] !== "string" || !entry[key].trim()) bad(`${where}.${key} must be a non-empty string`);
+    }
+    if (entry.scheme !== "light" && entry.scheme !== "dark") {
+      bad(`${where}.scheme must be "light" or "dark"`);
+      theme.scheme = "light";
+    }
+    for (const scheme of ["light", "dark"]) {
+      for (const name of TOKENS) {
+        const value = entry.colors?.[scheme]?.[name];
+        if (validColor(value)) theme[scheme][name] = value;
+        else bad(`${where}.colors.${scheme}.${name} must be a CSS color, got ${JSON.stringify(value)}`);
+      }
+    }
+    if (entry.fonts != null) {
+      const fontIssues = [];
+      for (const [role, spec] of Object.entries(entry.fonts)) {
+        if (!FONT_ROLES.includes(role)) fontIssues.push(issue("warning", "font-role-unknown", `unknown font role "${role}"`));
+        const font = FONT_ROLES.includes(role) ? normalizeFont(role, spec, fontIssues, { fromType: true }) : null;
+        if (font) theme.fonts[role] = font;
+      }
+      for (const item of fontIssues) bad(`${where}: ${item.message}`);
+    }
+    if (entry.stylesheet != null) {
+      theme.stylesheet = /\.css$/i.test(entry.stylesheet) ? typeFileUrl(entry.stylesheet) : null;
+      if (!theme.stylesheet) bad(`${where}.stylesheet must be a .css file relative to the package root`);
+    }
+    if (typeof entry.preview !== "string" || !/\.(svg|png)$/i.test(entry.preview) || !typeFileUrl(entry.preview)) bad(`${where}.preview must be an .svg or .png file relative to the package root`);
+    themes.set(theme.id, theme);
+  });
+  if (themes.has(raw.defaultTheme)) defaultThemeId = raw.defaultTheme;
+  else bad(`"defaultTheme" ${JSON.stringify(raw.defaultTheme)} is not a theme id`);
+}
+
+async function loadThemes() {
+  const response = await fetch(`${TYPE_ROOT}slides.json`);
+  if (!response.ok) return typeIssues.push(issue("error", "slides-json-invalid", `_type/slides.json: HTTP ${response.status}`));
+  let raw;
+  try {
+    raw = JSON.parse(await response.text());
+  } catch (error) {
+    return typeIssues.push(issue("error", "slides-json-invalid", `_type/slides.json is not valid JSON: ${error.message}`));
+  }
+  normalizeThemes(raw);
+  // Every stylesheet loads up front, so a preset change after a deploy applies at once.
+  await Promise.all([...themes.values()].filter((theme) => theme.stylesheet).map(async (theme) => {
+    const sheetResponse = await fetch(theme.stylesheet);
+    if (!sheetResponse.ok) {
+      typeIssues.push(issue("error", "slides-json-invalid", `${theme.stylesheet}: HTTP ${sheetResponse.status}`));
+      return;
+    }
+    const sheet = new CSSStyleSheet({ baseURL: new URL(theme.stylesheet, location.origin).href });
+    sheet.replaceSync(await sheetResponse.text());
+    themeSheets.set(theme.id, sheet);
+  }));
 }
 
 // Inline slide HTML stays declarative: one slide is mounted several times at once (stage, overview,
@@ -935,25 +1048,43 @@ function connectDeployEvents() {
   connect();
 }
 
+function activeTheme() {
+  return themes.get(state.deck?.theme.preset ?? defaultThemeId) ?? null;
+}
+
+// Theme fonts fall back to the package's own families, which cover the scripts a theme font may lack.
+const THEME_FONT_FALLBACK = {
+  display: '"Inter Variable", var(--font-fallback)',
+  body: '"Inter Variable", var(--font-fallback)',
+  mono: '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+};
+
+// The preset's colors and fonts apply first; deck.json colors and fonts override them one by one.
 function applyTheme() {
   const root = document.documentElement;
   const theme = state.deck?.theme;
+  const preset = activeTheme();
+  activeThemeId = preset?.id ?? null;
+  if (activeThemeId) root.dataset.preset = activeThemeId;
+  else delete root.dataset.preset;
+  const sheet = themeSheets.get(activeThemeId);
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets.filter((item) => ![...themeSheets.values()].includes(item)), ...(sheet ? [sheet] : [])];
   for (const scheme of ["light", "dark"]) {
     for (const name of TOKENS) {
       const property = `--${scheme[0]}-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
-      const value = theme?.[scheme]?.[name];
+      const value = theme?.[scheme]?.[name] || preset?.[scheme]?.[name];
       if (value) root.style.setProperty(property, value);
       else root.style.removeProperty(property);
     }
   }
   for (const role of FONT_ROLES) {
-    const font = theme?.fonts?.[role];
+    const font = theme?.fonts?.[role] || preset?.fonts?.[role];
     if (!font) {
       root.style.removeProperty(`--font-${role}`);
       continue;
     }
     const family = `"${font.family.replace(/["\\\n\r]/g, "")}"`;
-    const fallback = role === "mono" ? 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' : 'var(--font-fallback)';
+    const fallback = font.fromType ? THEME_FONT_FALLBACK[role] : role === "mono" ? 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' : 'var(--font-fallback)';
     root.style.setProperty(`--font-${role}`, `${family}, ${fallback}`);
     if (font.href && !document.querySelector(`link[data-font-href="${CSS.escape(font.href)}"]`)) {
       const link = h("link", { rel: "stylesheet", href: font.href, "data-font-href": font.href });
@@ -964,10 +1095,11 @@ function applyTheme() {
       document.head.append(link);
     }
     for (const face of font.faces) {
-      const key = `${font.family}|${face.src}|${face.weight}|${face.style}`;
+      const key = `${font.family}|${face.src}|${face.weight}|${face.style}|${face.unicodeRange}`;
       if (loadedFaces.has(key)) continue;
       loadedFaces.add(key);
-      const fontFace = new FontFace(font.family, `url("${face.src.replace(/"/g, "%22")}")`, { weight: face.weight, style: face.style, display: "swap" });
+      const descriptors = { weight: face.weight, style: face.style, display: "swap", ...(face.unicodeRange ? { unicodeRange: face.unicodeRange } : {}) };
+      const fontFace = new FontFace(font.family, `url("${face.src.replace(/"/g, "%22")}")`, descriptors);
       document.fonts.add(fontFace);
       fontFace.load().catch(() => {});
     }
@@ -986,15 +1118,19 @@ function initialScheme() {
   return null;
 }
 const userScheme = initialScheme();
+// Once the visitor, the other window or the host picks a scheme, a deck update no longer changes it.
+let schemeChosen = Boolean(userScheme);
 
-function setScheme(scheme, { persist, broadcast } = {}) {
+function setScheme(scheme, { persist, broadcast, chosen } = {}) {
   state.scheme = scheme;
   document.documentElement.dataset.scheme = scheme;
+  if (chosen) schemeChosen = true;
   if (persist) {
     try { localStorage.setItem("slides-scheme", scheme); } catch {}
   }
   if (broadcast) sync.post({ kind: "scheme", scheme });
   for (const fn of schemeListeners) fn();
+  reportOutline();
 }
 const schemeListeners = [];
 
@@ -1008,7 +1144,7 @@ function sectionAt(index) {
 function buildFrame(index, { thumb = false, step = 0 } = {}) {
   const id = state.deck.order[index];
   const slide = state.slides.get(id);
-  const frame = h("div", { class: "frame", lang: state.deck.lang || null });
+  const frame = h("div", { class: "frame", lang: state.deck.lang || null, "data-preset": activeThemeId });
   if (!slide || slide.status === "missing" || slide.status === "error" || !slide.fragment) {
     frame.classList.add("is-placeholder");
     const failed = slide?.status === "error";
@@ -1085,7 +1221,9 @@ function handBackEscape(iframe) {
 
 function mountFrame(host, { frame, sheets, still }) {
   const root = host.shadowRoot || host.attachShadow({ mode: "open" });
-  root.adoptedStyleSheets = still ? [STILL_SHEET, slideSheet, ...sheets] : [slideSheet, ...sheets];
+  // The theme stylesheet sits between the built-in styles and the slide's own.
+  const theme = themeSheets.has(activeThemeId) ? [themeSheets.get(activeThemeId)] : [];
+  root.adoptedStyleSheets = [...(still ? [STILL_SHEET] : []), slideSheet, ...theme, ...sheets];
   // Still frames are pictures: clicks reach the overview button and nothing inside takes focus.
   frame.inert = Boolean(still);
   root.replaceChildren(frame);
@@ -1151,6 +1289,7 @@ function go(index, { from = "local", step = 0 } = {}) {
   syncHash();
   view.render?.({ moved, stepped, full: false });
   if (from === "local") sync.post({ kind: "goto", id: currentId(), step: state.step });
+  reportSlide();
 }
 
 // Forward reveals the next step before it leaves the slide; back hides the last step, and coming back
@@ -1210,7 +1349,7 @@ function onKeyDown(event) {
     go(0);
   } else if (key === "End") {
     go(total() - 1, { step: stepCount(total() - 1) });
-  } else if (key === "o" || key === "g") {
+  } else if ((key === "o" || key === "g") && !EMBED) {
     openOverview();
   } else if (key === "f") {
     toggleFullscreen();
@@ -1220,7 +1359,7 @@ function onKeyDown(event) {
     toggleScheme();
   } else if (key === "b" || key === ".") {
     setBlackout(!state.blackout, true);
-  } else if (key === "?") {
+  } else if (key === "?" && !EMBED) {
     openHelp();
   } else {
     handled = false;
@@ -1229,7 +1368,7 @@ function onKeyDown(event) {
 }
 
 function toggleScheme() {
-  setScheme(state.scheme === "dark" ? "light" : "dark", { persist: true, broadcast: true });
+  setScheme(state.scheme === "dark" ? "light" : "dark", { persist: true, broadcast: true, chosen: true });
 }
 
 function setBlackout(on, broadcast) {
@@ -1245,17 +1384,55 @@ function toggleFullscreen() {
 
 function openPresenter() {
   const url = `${location.pathname}?presenter=1${location.hash}`;
-  window.open(url, `slides-presenter-${location.host}`, "popup,width=1280,height=800");
+  const win = window.open(url, `slides-presenter-${location.host}`, "popup,width=1280,height=800");
+  if (win) sync.addPeer(win);
+  return win;
 }
 
-// Presenter and audience windows of this deck in one browser follow each other.
+// Presenter and audience windows of this deck in one browser follow each other. The BroadcastChannel
+// reaches the windows of this origin in one storage partition. An embedded viewer sits in its host's
+// partition, so messages also go straight to the windows this one knows: the presenter window it
+// opened, its opener and the opener's frames (a presenter window that a host page opened), and every
+// window of this origin that messaged it. A message can arrive both ways and is handled once.
 const sync = (() => {
   const role = PRESENTER ? "presenter" : "audience";
   const channel = "BroadcastChannel" in window ? new BroadcastChannel(`slides:${location.host}`) : null;
   const sender = Math.random().toString(36).slice(2);
-  const post = (message) => channel?.postMessage({ ...message, role, sender });
-  channel?.addEventListener("message", ({ data }) => {
+  const peers = new Set();
+  const seen = new Set();
+  let sent = 0;
+  // Reading a window's location throws across origins, the only test of a WindowProxy's origin.
+  const sameOrigin = (win) => {
+    try {
+      return win.location.origin === location.origin;
+    } catch {
+      return false;
+    }
+  };
+  const targets = () => {
+    for (const peer of peers) if (peer.closed) peers.delete(peer);
+    const list = [...peers];
+    const opener = window.opener;
+    if (opener && !opener.closed) {
+      list.push(opener);
+      for (let i = 0; i < opener.length; i += 1) list.push(opener[i]);
+    }
+    return list.filter((win) => win !== window && !win.closed && sameOrigin(win));
+  };
+  const post = (message) => {
+    sent += 1;
+    const data = { ...message, role, sender, seq: `${sender}.${sent}` };
+    channel?.postMessage(data);
+    for (const peer of targets()) peer.postMessage({ slidesSync: data }, location.origin);
+  };
+  const receive = (data, source) => {
     if (!data || data.sender === sender || data.role === role) return;
+    if (data.seq) {
+      if (seen.has(data.seq)) return;
+      seen.add(data.seq);
+      if (seen.size > 200) seen.delete(seen.values().next().value);
+    }
+    if (source) peers.add(source);
     if (data.kind === "goto") {
       const step = Number.isInteger(data.step) ? data.step : 0;
       if (state.deck) goToId(data.id, { from: "remote", step });
@@ -1264,12 +1441,16 @@ const sync = (() => {
       post({ kind: "goto", id: currentId(), step: state.step });
       post({ kind: "scheme", scheme: state.scheme });
     } else if (data.kind === "scheme" && (data.scheme === "light" || data.scheme === "dark")) {
-      setScheme(data.scheme);
+      setScheme(data.scheme, { chosen: true });
     } else if (data.kind === "blackout" && !PRESENTER) {
       setBlackout(Boolean(data.on));
     }
+  };
+  channel?.addEventListener("message", ({ data }) => receive(data));
+  window.addEventListener("message", (event) => {
+    if (event.origin === location.origin && event.source && event.data?.slidesSync) receive(event.data.slidesSync, event.source);
   });
-  return { post };
+  return { post, addPeer: (win) => peers.add(win) };
 })();
 
 let overviewDialog = null;
@@ -1409,6 +1590,59 @@ function showNotice(kind) {
   return notice;
 }
 
+// Embed mode's slide strip: a still of every slide with its number, grouped by section.
+function slideStrip() {
+  const list = h("ol");
+  const nav = h("nav", { class: "strip", "aria-label": t("slides") }, list);
+  let items = [];
+  const paint = (index) => {
+    const item = items[index];
+    if (!item) return;
+    renderInto(item.slot, index, { thumb: true });
+    const title = state.slides.get(state.deck.order[index])?.title || state.deck.order[index];
+    item.button.setAttribute("aria-label", `${t("slideOf", { n: index + 1, total: total() })}: ${title}`);
+  };
+  const build = () => {
+    releaseSlots(list);
+    list.replaceChildren();
+    items = [];
+    if (state.deckStatus !== "ok") return;
+    state.deck.order.forEach((id, index) => {
+      const section = state.deck.sections.find((entry) => entry.start === index);
+      if (section) list.append(h("li", { class: "strip-section", "aria-hidden": "true", text: section.title }));
+      const slot = makeSlot();
+      const button = h("button", { type: "button", onclick: () => go(index) }, slot.slot);
+      items.push({ slot, button });
+      list.append(h("li", { class: "strip-item" }, h("span", { class: "strip-num", "aria-hidden": "true", text: String(index + 1) }), button));
+      paint(index);
+    });
+  };
+  // Scrolls only the strip: scrollIntoView could also scroll the host page.
+  const mark = (reveal) => {
+    items.forEach((item, index) => {
+      if (index === state.index) item.button.setAttribute("aria-current", "true");
+      else item.button.removeAttribute("aria-current");
+    });
+    const button = items[state.index]?.button;
+    if (!reveal || !button) return;
+    const box = nav.getBoundingClientRect();
+    const rect = button.getBoundingClientRect();
+    if (rect.top < box.top) nav.scrollTop -= box.top - rect.top + 12;
+    else if (rect.bottom > box.bottom) nav.scrollTop += rect.bottom - box.bottom + 12;
+    if (rect.left < box.left) nav.scrollLeft -= box.left - rect.left + 12;
+    else if (rect.right > box.right) nav.scrollLeft += rect.right - box.right + 12;
+  };
+  return {
+    nav,
+    dataChanged({ deckChanged, orderChanged, changedSlides }) {
+      if (deckChanged || orderChanged) build();
+      else for (const id of changedSlides) paint(state.deck.order.indexOf(id));
+      mark(true);
+    },
+    mark,
+  };
+}
+
 function audienceView() {
   const { slot, host } = makeSlot("stage");
   slot.setAttribute("role", "region");
@@ -1426,6 +1660,8 @@ function audienceView() {
     themeButton, fullButton,
     iconButton("help", t("shortcuts"), openHelp, "wide-only"),
   );
+  // Embedded, the host page draws the controls; the viewer keeps the stage and adds the strip.
+  const strip = EMBED ? slideStrip() : null;
   let notice = null;
 
   const updateChrome = () => {
@@ -1478,10 +1714,12 @@ function audienceView() {
   for (const name of ["mousemove", "pointerdown", "keydown", "touchstart"]) window.addEventListener(name, wake, { passive: true });
   wake();
 
-  app.replaceChildren(slot, progress, h("div", { class: "blackout" }), toolbar, live);
+  app.replaceChildren(slot, progress, h("div", { class: "blackout" }), strip ? strip.nav : toolbar, live);
+  app.classList.toggle("embed", EMBED);
   updateChrome();
 
   return {
+    dataChanged: strip?.dataChanged,
     render({ moved, stepped, full } = {}) {
       notice?.remove();
       notice = null;
@@ -1489,6 +1727,7 @@ function audienceView() {
         host.shadowRoot?.replaceChildren();
         toolbar.hidden = true;
         progress.hidden = true;
+        if (strip) strip.nav.hidden = true;
         const kind = state.deckStatus === "loading" ? "loading" : state.deckStatus === "invalid" ? "error" : "empty";
         notice = showNotice(kind);
         app.prepend(notice);
@@ -1497,6 +1736,10 @@ function audienceView() {
       }
       toolbar.hidden = false;
       progress.hidden = false;
+      if (strip) {
+        strip.nav.hidden = false;
+        if (moved) strip.mark(true);
+      }
       if (moved || full !== false) renderInto({ slot, host }, state.index, { step: state.step });
       else if (stepped) {
         // Screen readers do not announce content that becomes visible, so a step says what it revealed.
@@ -1794,13 +2037,15 @@ async function runCheck() {
       measure.remove();
     }
   }
-  const errors = state.deckIssues.filter((item) => item.level === "error").length + results.reduce((sum, slide) => sum + slide.issues.filter((item) => item.level === "error").length, 0);
-  const warnings = state.deckIssues.filter((item) => item.level === "warning").length + results.reduce((sum, slide) => sum + slide.issues.filter((item) => item.level === "warning").length, 0);
+  const all = [...typeIssues, ...state.deckIssues, ...results.flatMap((slide) => slide.issues)];
+  const errors = all.filter((item) => item.level === "error").length;
+  const warnings = all.filter((item) => item.level === "warning").length;
   const report = {
     type: TYPE_ID,
     ok: errors === 0,
     complete: !incomplete(),
-    deck: { status: state.deckStatus === "ok" && state.deckIssues.some((item) => item.level === "error") ? "error" : state.deckStatus, title: state.deck?.title || "", slides: total(), sections: (state.deck?.sections || []).map((section) => ({ id: section.id, title: section.title, start: state.deck.order[section.start] })), issues: state.deckIssues },
+    package: { issues: typeIssues },
+    deck: { status: state.deckStatus === "ok" && state.deckIssues.some((item) => item.level === "error") ? "error" : state.deckStatus, title: state.deck?.title || "", preset: activeThemeId, slides: total(), sections: (state.deck?.sections || []).map((section) => ({ id: section.id, title: section.title, start: state.deck.order[section.start] })), issues: state.deckIssues },
     summary: {
       errors,
       warnings,
@@ -1824,9 +2069,10 @@ function renderCheck(report, results) {
     h("span", { class: `check-status ${report.ok ? "ok" : "bad"}`, text: status }),
     h("span", { class: "fine", text: `${report.deck.slides} slides · ${report.summary.warnings} warning(s) · ${TYPE_ID}` }),
   ));
-  if (report.deck.issues.length) {
-    inner.append(h("div", { class: "check-row" }, h("div"), h("div", null, h("h2", { text: "project/deck.json" }),
-      h("ul", null, report.deck.issues.map((item) => h("li", { class: item.level, text: item.message }))))));
+  for (const [file, issues] of [["_type/slides.json", report.package.issues], ["project/deck.json", report.deck.issues]]) {
+    if (!issues.length) continue;
+    inner.append(h("div", { class: "check-row" }, h("div"), h("div", null, h("h2", { text: file }),
+      h("ul", null, issues.map((item) => h("li", { class: item.level, text: item.message }))))));
   }
   results.forEach((slide, index) => {
     const slot = makeSlot();
@@ -1856,7 +2102,7 @@ function renderCheck(report, results) {
 function onDataChanged({ deckChanged, orderChanged, changedSlides, shownId }) {
   if (deckChanged) {
     applyTheme();
-    if (!userScheme && state.deck?.theme.scheme) setScheme(state.deck.theme.scheme);
+    if (!schemeChosen) setScheme(state.deck?.theme.scheme || activeTheme()?.scheme || "light");
   }
   if (state.deckStatus === "ok" && total()) {
     const keep = state.pendingId ?? shownId ?? currentId();
@@ -1876,19 +2122,110 @@ function onDataChanged({ deckChanged, orderChanged, changedSlides, shownId }) {
   // The current slide is remounted only when it changed, so a running app keeps its state.
   const full = deckChanged || orderChanged || changedSlides.has(currentId());
   view.render?.({ full });
+  view.dataChanged?.({ deckChanged, orderChanged, changedSlides });
+  reportOutline();
+  reportSlide();
   if (overviewDialog && (deckChanged || orderChanged || changedSlides.size)) {
     if (state.deckStatus === "ok" && total()) overviewDialog.refresh();
     else overviewDialog.close();
   }
 }
 
+// Embed mode's host protocol. The host frames /?embed=1&host=<its origin>#<slide id> and exchanges
+// {slides: CONTRACT, type, ...} messages with the viewer. The envelope owns `slides` and `type`, so `ready`
+// names the site type `siteType`, and `ready` and `outline` carry the outline as `outline`. Commands are taken only from the parent window
+// at the host origin, and messages go only to the parent with the host origin as target, never "*";
+// who may frame a private deck is Spot's frame-ancestors policy. Unknown types are ignored.
+const embedHost = { ready: false, outline: "", slide: "" };
+
+function postToHost(type, body) {
+  if (HOST_ORIGIN && window.parent !== window) window.parent.postMessage({ ...body, slides: CONTRACT, type }, HOST_ORIGIN);
+}
+
+function deckOutline() {
+  return {
+    title: state.deck?.title || "",
+    theme: { preset: activeThemeId, scheme: state.scheme },
+    slides: state.deckStatus === "ok" ? state.deck.order.map((id, index) => ({
+      id,
+      title: state.slides.get(id)?.title || id,
+      section: sectionAt(index)?.title ?? null,
+      missing: state.slides.get(id)?.status === "missing",
+    })) : [],
+  };
+}
+
+// outline and slide are posted when they differ from the last one the host got.
+function reportOutline() {
+  if (!embedHost.ready) return;
+  const outline = deckOutline();
+  const text = JSON.stringify(outline);
+  if (text === embedHost.outline) return;
+  embedHost.outline = text;
+  postToHost("outline", { outline });
+}
+
+function reportSlide() {
+  if (!embedHost.ready || !currentId()) return;
+  const slide = { id: currentId(), index: state.index };
+  const text = JSON.stringify(slide);
+  if (text === embedHost.slide) return;
+  embedHost.slide = text;
+  postToHost("slide", slide);
+}
+
+function announceReady() {
+  const outline = deckOutline();
+  embedHost.ready = true;
+  embedHost.outline = JSON.stringify(outline);
+  postToHost("ready", { contract: CONTRACT, siteType: { name: TYPE_NAME, version: TYPE_VERSION }, outline });
+  reportSlide();
+}
+
+const hostError = (code, message) => postToHost("error", { code, message });
+
+const HOST_COMMANDS = {
+  goto({ id }) {
+    if (typeof id !== "string") return hostError("command-invalid", 'goto needs an "id" string');
+    if (!state.deck) return Object.assign(state, { pendingId: id, pendingStep: 0 });
+    if (!state.deck.order.includes(id)) return hostError("slide-unknown", `There is no slide "${id}" in this deck`);
+    goToId(id);
+  },
+  // Fullscreen needs a user activation, which a cross-origin frame does not get from the host's click;
+  // the host delegates it: postMessage(message, { targetOrigin, delegate: "fullscreen" }).
+  present() {
+    if (document.fullscreenElement) return;
+    if (!document.documentElement.requestFullscreen) return hostError("fullscreen-denied", "This browser cannot show a page in fullscreen");
+    document.documentElement.requestFullscreen().catch((error) => hostError("fullscreen-denied", String(error?.message || error)));
+  },
+  presenter() {
+    if (!openPresenter()) hostError("popup-blocked", "The browser blocked the presenter window");
+  },
+  print() {
+    window.print();
+  },
+  scheme({ scheme }) {
+    if (scheme !== "light" && scheme !== "dark") return hostError("command-invalid", 'scheme needs "light" or "dark"');
+    setScheme(scheme, { broadcast: true, chosen: true });
+  },
+};
+
+if (HOST_ORIGIN) {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent || event.origin !== HOST_ORIGIN) return;
+    const data = event.data;
+    if (!data || typeof data !== "object" || data.slides !== CONTRACT || !Object.hasOwn(HOST_COMMANDS, data.type)) return;
+    HOST_COMMANDS[data.type](data);
+  });
+}
+
 async function start() {
   try { sessionStorage.removeItem(`slides-reload:${TYPE_ID}`); } catch {}
   setScheme(userScheme || "light");
-  const css = await fetch("/_type/slide.css").then((response) => {
+  const [css] = await Promise.all([fetch("/_type/slide.css").then((response) => {
     if (!response.ok) throw new Error(`slide.css: HTTP ${response.status}`);
     return response.text();
-  });
+  }), loadThemes()]);
   slideSheet = new CSSStyleSheet();
   slideSheet.replaceSync(css);
   document.body.append(printRoot);
@@ -1898,6 +2235,7 @@ async function start() {
   const changed = await refresh(false);
   if (!changed) onDataChanged({ deckChanged: false, orderChanged: false, changedSlides: new Set() });
   app.removeAttribute("aria-busy");
+  if (EMBED) announceReady();
   if (PRESENTER) sync.post({ kind: "hello" });
   connectDeployEvents();
   schedulePoll(true);

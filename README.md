@@ -4,7 +4,7 @@ Site types for SecondStack Sites. A site type is a viewer that many sites share:
 
 | Folder | Type |
 |---|---|
-| [`slides/`](./slides) | Slides: a presentation deck, one HTML section per slide, in a 16:9 viewer with overview, presenter view, fullscreen and print to PDF. |
+| [`slides/`](./slides) | Slides: a presentation deck, one HTML section per slide, in a 16:9 viewer with themes, overview, presenter view, fullscreen, print to PDF and an embed mode for host apps. |
 
 ## Layout
 
@@ -15,7 +15,7 @@ A package is:
 - `type.json`: `format`, `name`, `version` (SemVer), `title`, `description` and `data`, the data paths a site of this type may write;
 - `index.html`: the viewer entry;
 - `SKILL.md`: optional instructions that agents read before they write a site of this type;
-- the other viewer files (scripts, styles, fonts).
+- the other viewer files (scripts, styles, fonts), and for the Slides family `slides.json` (see below).
 
 Links, dot files and `node_modules` are not allowed in a package. A package has at most 2,000 files and 90 MiB.
 
@@ -38,14 +38,45 @@ Installing a type means trusting it. Its viewer runs with the visitor's authorit
 
 1. Fork this repository, or copy one type folder into your own repository.
 2. Change the viewer, and bump `version` in `type.json`. An installed version can never change: an upload with different bytes under an installed version is refused. Develop under a prerelease version, for example `1.1.0-dev.1`.
-3. To run your fork beside the original, rename the type: change `name` in `type.json`.
+3. To run your fork beside the original, rename the type: change `name` in `type.json` and `TYPE_NAME` in `slides/viewer.js`.
 4. Install your folder URL in ControlTower, and press **Reload sources** after each release.
+
+To give a Slides fork its own themes, replace `slides.json` and add the theme assets; the viewer code stays as it is. Fonts go in the package with `faces[].unicodeRange` for subset files. A theme stylesheet sets the shape tokens `--heading-weight-shift`, `--heading-tracking`, `--radius-scale` and `--eyebrow-tracking` on `:root[data-preset="<id>"]`, and wraps slide rules in `:where([data-preset="<id>"])` so that a slide's own `<style>` still wins over them. `node checks/preview.mjs` renders every theme's preview image.
 
 ## Compatibility rule
 
 Every SecondStack site follows the newest version of its type's major. So a minor or patch release must keep the data contract and keep existing sites working: the data paths, the data format and every building block that `SKILL.md` documents change only additively. A change that breaks this is a new major version.
 
-For Slides this means: within a major, the 1920×1080 frame, the default palette and fonts, the layouts and every building block `SKILL.md` documents change only additively. Sanitizer changes are the exception and are allowed for security. Anything else is a new major, which also bumps `deck.json` `v`.
+For Slides this means: within a major, the 1920×1080 frame, the default theme, the layouts and every building block `SKILL.md` documents change only additively, and so do `slides.json` and the host protocol within their `contract`. Sanitizer changes are the exception and are allowed for security. Anything else is a new major, which also bumps `deck.json` `v`.
+
+## Slides host contract
+
+The Slides family is every type whose package has `slides.json` at its root; Spot serves it as `/_type/slides.json`. Contract 1:
+
+- `contract`: `1`, the major of this file and of the host protocol.
+- `defaultTheme`: the theme of a deck without `theme.preset`, and of a deck whose preset is unknown (check mode reports `unknown-preset`).
+- `themes`: each with `id` (`[a-z0-9-]{1,32}`), `title`, `description`, `scheme` (`light` or `dark`, the default of a deck in this theme), `colors.light` and `colors.dark` with the seven `deck.json` color roles, optional `fonts` (the `deck.json` roles, `faces[].src` relative to the package root, optional `faces[].unicodeRange`), optional `stylesheet` and `preview` (a 16:9 PNG or SVG that hosts show as the swatch). Paths are relative to the package root.
+
+A deck picks a theme with `deck.json` `theme.preset`. The theme's colors and fonts apply first; `scheme`, colors and fonts in `deck.json` override them.
+
+A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded host origin>#<slide id>`. The viewer then shows the stage and a slide strip, without its toolbar, overview and help. Messages are `{ "slides": 1, "type": "<name>", ... }` over `postMessage`. The viewer takes commands only from its parent window at the `host` origin and posts only to its parent with that origin as the target. The host must accept messages only from the frame's window and the site origin.
+
+| Viewer → host | Fields |
+|---|---|
+| `ready` | `contract`, `siteType` (`name`, `version`), `outline`; sent again after the viewer reloads |
+| `outline` | `outline`: `title`, `theme` (`preset`, `scheme`), `slides` (`id`, `title`, `section` title or `null`, `missing`); after any change |
+| `slide` | `id`, `index` of the current slide |
+| `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid`, `fullscreen-denied`, `popup-blocked` |
+
+| Host → viewer | Fields |
+|---|---|
+| `goto` | `id` |
+| `present` | Fullscreen on the viewer's document. Send it in a click handler with `postMessage(message, { targetOrigin, delegate: "fullscreen" })` and frame with `allow="fullscreen"`: a cross-origin frame gets no activation from the host's click otherwise. |
+| `presenter` | Opens the presenter window. Browsers block popups from a frame without its own click; a host can instead open `https://<site>/?presenter=1#<slide id>` itself in its click handler, without `noopener`, and that window finds the embedded viewer. |
+| `print` | The print dialog (save as PDF) |
+| `scheme` | `scheme`: `light` or `dark` |
+
+Unknown types and messages of another `slides` major are ignored.
 
 ## Release check
 
@@ -54,8 +85,9 @@ Every site follows its major, so a viewer change reaches every deck on that majo
 - check mode reports an error, or a warning that the deck's `check.json` does not expect, sanitizer removals included;
 - a sanitizer payload leaves an execution marker;
 - a slide's screenshot, on the stage or in print, light or dark, differs from the same deck rendered by the previous release (the highest `slides-v*` tag at or below the candidate version);
-- keyboard navigation, the overview, the presenter window's sync with the audience window, or the PDF page count goes wrong;
-- the package changed but `version` did not go up, or `TYPE_VERSION` in `viewer.js` differs from `type.json`.
+- keyboard navigation, the overview, the presenter window's sync with the audience window, the host protocol, or the PDF page count goes wrong;
+- a theme in `slides.json` lacks its preview, stylesheet or font files, or its preview is not 16:9;
+- the package changed but `version` did not go up, or `TYPE_NAME` and `TYPE_VERSION` in `viewer.js` differ from `type.json`.
 
 The check runs on every pull request. To run it locally:
 

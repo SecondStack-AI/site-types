@@ -6,9 +6,11 @@
 //     /api/probe, or a request to probe.invalid;
 //   - screenshots every slide on the stage and in print, light and dark, and compares each screenshot
 //     with the same deck rendered by the previous release (the highest slides-v* tag at or below the
-//     candidate version) in the same browser.
-// It also checks the version: viewer.js TYPE_VERSION equals type.json, and changed package bytes come
-// with a higher version than the baseline tag and the --base ref.
+//     candidate version) in the same browser;
+//   - drives the host protocol from a host page on another site, for a deck whose check.json has "embed".
+// It also checks the package: viewer.js TYPE_NAME and TYPE_VERSION equal type.json, changed package
+// bytes come with a higher version than the baseline tag and the --base ref, and every theme in
+// slides.json has its preview (16:9), stylesheet and font files.
 //
 //   node checks/run.mjs [--deck <name>]... [--baseline <git ref>|none] [--base <git ref>] [--save]
 //
@@ -17,7 +19,8 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,7 +134,7 @@ async function loadDecks(only) {
     const deck = JSON.parse(await readFile(path.join(dir, "project", "deck.json"), "utf8"));
     const expectFile = path.join(dir, "check.json");
     const expect = existsSync(expectFile) ? JSON.parse(await readFile(expectFile, "utf8")) : {};
-    decks.push({ name: entry.name, dir, order: deck.order, expect });
+    decks.push({ name: entry.name, dir, order: deck.order, title: deck.title, scheme: deck.theme?.scheme, expect });
   }
   for (const name of only) if (!decks.some((deck) => deck.name === name)) throw new Error(`no deck named ${name} in ${DECKS_DIR}`);
   return decks;
@@ -195,7 +198,9 @@ function compareReport(report, deck, version) {
   if (report.type !== `${TYPE}@${version}`) problems.push(`check report type is ${report.type}, expected ${TYPE}@${version}`);
   if (!report.complete) problems.push("check mode reports the deck as incomplete");
   if (report.slides.length !== deck.order.length) problems.push(`check mode reports ${report.slides.length} slides, deck.json lists ${deck.order.length}`);
-  compareIssues("project/deck.json", report.deck.issues, deck.expect.deckWarnings || [], [], problems);
+  compareIssues("_type/slides.json", report.package?.issues || [], [], [], problems);
+  compareIssues("project/deck.json", report.deck.issues, deck.expect.deckWarnings || [], deck.expect.deckErrors || [], problems);
+  if (deck.expect.preset !== undefined && report.deck.preset !== deck.expect.preset) problems.push(`check mode shows the deck in theme ${JSON.stringify(report.deck.preset)}, check.json says ${JSON.stringify(deck.expect.preset)}`);
   const warnings = deck.expect.warnings || {};
   const errors = deck.expect.errors || {};
   const notes = deck.expect.notes || {};
@@ -242,7 +247,7 @@ async function fulfilExternal(route, record, packageDir) {
 
 async function newContext(browser, record, packageDir) {
   const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, locale: "en-US", timezoneId: "UTC" });
-  await context.route((url) => url.hostname !== "127.0.0.1", (route) => fulfilExternal(route, record, packageDir));
+  await context.route((url) => url.hostname !== "127.0.0.1" && url.hostname !== "localhost", (route) => fulfilExternal(route, record, packageDir));
   context.on("page", (page) => watchPage(page, record));
   return context;
 }
@@ -445,6 +450,10 @@ async function presenterSync(context, site, deck, problems) {
 async function interact(context, site, deck, steps, problems) {
   const total = deck.order.length;
   const page = await openDeck(context, site, "", deck.order[0]);
+  // Without ?theme the scheme comes from deck.json, then from the preset.
+  const scheme = await page.evaluate(() => document.documentElement.dataset.scheme);
+  const wantScheme = deck.expect.scheme ?? deck.scheme ?? "light";
+  if (scheme !== wantScheme) problems.push(`the deck opens in the ${scheme} scheme, expected ${wantScheme}`);
   for (const state of stageStates(deck, steps).slice(1)) {
     await page.keyboard.press("ArrowRight");
     if (!(await textIs(page, ".counter", `${state.index + 1} / ${total}`)) || !(await hashIs(page, state.hash))) {
@@ -560,6 +569,202 @@ async function saveShot(file, bytes) {
   await writeFile(file, bytes);
 }
 
+// Width and height of a PNG (IHDR) or an SVG (viewBox, else width and height).
+function imageSize(bytes, file) {
+  if (file.endsWith(".png")) return bytes.length > 24 && bytes.toString("latin1", 1, 4) === "PNG" ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) } : null;
+  const svg = bytes.toString("utf8");
+  const box = /<svg\b[^>]*\bviewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']/i.exec(svg);
+  if (box) return { width: Number(box[1]), height: Number(box[2]) };
+  const width = /<svg\b[^>]*\bwidth\s*=\s*["']([\d.]+)(?:px)?["']/i.exec(svg)?.[1];
+  const height = /<svg\b[^>]*\bheight\s*=\s*["']([\d.]+)(?:px)?["']/i.exec(svg)?.[1];
+  return width && height ? { width: Number(width), height: Number(height) } : null;
+}
+
+// The files slides.json names, read the way the site serves /_type/: the deck's type/ overlay first.
+// The viewer checks the rest of slides.json, and check mode reports it on every deck.
+async function checkThemeFiles(dirs, label) {
+  const problems = [];
+  const read = async (rel) => {
+    for (const dir of dirs) {
+      const bytes = await readFile(path.join(dir, rel)).catch(() => null);
+      if (bytes) return bytes;
+    }
+    return null;
+  };
+  const text = await read("slides.json");
+  if (!text) return [`${label}: slides.json is missing`];
+  const { themes = [] } = JSON.parse(text);
+  for (const theme of themes) {
+    const preview = typeof theme.preview === "string" ? await read(theme.preview) : null;
+    const size = preview && imageSize(preview, theme.preview.toLowerCase());
+    if (!preview) problems.push(`${label}: theme ${theme.id} preview ${theme.preview} is missing`);
+    else if (!size || Math.abs(size.width / size.height - 16 / 9) > 0.01) problems.push(`${label}: theme ${theme.id} preview ${theme.preview} is ${size ? `${size.width}x${size.height}` : "not a readable PNG or SVG"}, not 16:9`);
+    if (theme.stylesheet && !(await read(theme.stylesheet))) problems.push(`${label}: theme ${theme.id} stylesheet ${theme.stylesheet} is missing`);
+    for (const spec of Object.values(theme.fonts || {})) {
+      for (const face of spec.faces || []) if (!(await read(face.src))) problems.push(`${label}: theme ${theme.id} font ${face.src} is missing`);
+    }
+  }
+  return problems;
+}
+
+// The host protocol (the C3 contract): the host page embed-host.html, served from localhost so it is
+// another site than the deck on 127.0.0.1, frames the viewer and records what the viewer frame sends.
+// The deck starts with one listed slide missing, which is published during the run.
+async function embedProtocol(browser, deck, version, problems) {
+  const fail = (text) => problems.push(`host protocol: ${text}`);
+  const order = deck.order;
+  const missingId = deck.expect.embed.missing;
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "slides-embed-"));
+  await cp(deck.dir, dataDir, { recursive: true });
+  const missingFile = path.join(dataDir, "project", "slides", `${missingId}.html`);
+  const missingText = await readFile(missingFile);
+  await rm(missingFile);
+  const site = await serveSite({ packageDir: CANDIDATE_DIR, dataDir });
+  const hostPage = await readFile(path.join(HERE, "embed-host.html"));
+  const hostServer = createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(hostPage);
+  });
+  await new Promise((resolve) => hostServer.listen(0, "localhost", resolve));
+  const record = { errors: [], markers: [] };
+  const context = await newContext(browser, record, CANDIDATE_DIR);
+  // A browser that partitions storage keeps an embedded viewer and its presenter window on different
+  // BroadcastChannels; without the channel, presenter sync must work through window references.
+  await context.addInitScript(() => { delete window.BroadcastChannel; });
+  let cursor = 0;
+  const page = await context.newPage();
+  const messages = () => page.evaluate(() => window.received.map((entry) => entry.data));
+  const waitMessage = async (label, test, timeout = 5000) => {
+    for (const until = Date.now() + timeout; Date.now() < until; await sleep(50)) {
+      const list = await messages();
+      const at = list.findIndex((message, index) => index >= cursor && test(message));
+      if (at >= 0) {
+        cursor = at + 1;
+        return list[at];
+      }
+    }
+    fail(`${label}: no such message; after the last expected one the viewer sent ${JSON.stringify((await messages()).slice(cursor))}`);
+    return null;
+  };
+  const quiet = async (label) => {
+    await sleep(700);
+    const list = await messages();
+    if (list.length > cursor) fail(`${label}: the viewer answered ${JSON.stringify(list.slice(cursor))}`);
+    cursor = list.length;
+  };
+  const isSlide = (index) => (message) => message.type === "slide" && message.id === order[index] && message.index === index;
+  try {
+    await page.goto(`http://localhost:${hostServer.address().port}/?site=${encodeURIComponent(site.url)}&id=${order[0]}`);
+    const ready = await waitMessage("ready", (message) => message.type === "ready");
+    const viewer = await (await page.$("#viewer")).contentFrame();
+    const wrong = await (await page.$("#wrong")).contentFrame();
+    if (ready) {
+      const { outline } = ready;
+      if (ready.slides !== 1 || ready.contract !== 1) fail(`ready has slides ${ready.slides} and contract ${ready.contract}, expected 1 and 1`);
+      if (ready.siteType?.name !== TYPE || ready.siteType?.version !== version) fail(`ready names the site type ${JSON.stringify(ready.siteType)}`);
+      if (outline.title !== deck.title) fail(`outline title is ${JSON.stringify(outline.title)}`);
+      if (outline.theme?.preset !== "default" || outline.theme?.scheme !== "light") fail(`outline theme is ${JSON.stringify(outline.theme)}`);
+      if (outline.slides.map((slide) => slide.id).join() !== order.join()) fail(`outline lists ${outline.slides.map((slide) => slide.id)}`);
+      for (const slide of outline.slides) {
+        if (slide.missing !== (slide.id === missingId)) fail(`outline says ${slide.id} is ${slide.missing ? "" : "not "}missing`);
+      }
+      if (outline.slides.find((slide) => slide.id === missingId)?.section !== "Results" || outline.slides[0].section !== null) fail(`outline sections are ${JSON.stringify(outline.slides.map((slide) => slide.section))}`);
+    }
+    await waitMessage("the first slide message", isSlide(0));
+    // Before anything is clicked in the viewer frame, which would give the frame its own activation.
+    await page.evaluate(() => window.send({ type: "present" }));
+    await waitMessage("present without a click", (message) => message.type === "error" && message.code === "fullscreen-denied");
+
+    const layout = await viewer.evaluate(() => ({
+      toolbar: Boolean(document.querySelector(".toolbar")),
+      strip: document.querySelectorAll(".strip-item").length,
+      placeholder: Boolean(document.querySelectorAll(".strip-item .slide-host")[2]?.shadowRoot?.querySelector(".is-placeholder")),
+    }));
+    if (layout.toolbar || layout.strip !== order.length) fail(`embed mode shows a toolbar: ${layout.toolbar}, ${layout.strip} strip items for ${order.length} slides`);
+    if (!layout.placeholder) fail(`the strip shows no placeholder for the missing slide ${missingId}`);
+
+    await page.evaluate((id) => window.send({ type: "goto", id }), order[2]);
+    await waitMessage("goto", isSlide(2));
+    await page.evaluate(() => window.send({ type: "goto", id: "no-such-slide" }));
+    await waitMessage("goto to an unknown slide", (message) => message.type === "error" && message.code === "slide-unknown");
+    await page.evaluate(() => window.send({ type: "scheme", scheme: "blue" }));
+    await waitMessage("an invalid scheme", (message) => message.type === "error" && message.code === "command-invalid");
+    await page.evaluate((site) => {
+      window.send({ type: "no-such-command" });
+      document.getElementById("viewer").contentWindow.postMessage({ slides: 2, type: "goto", id: "cover" }, site);
+    }, site.url);
+    await quiet("an unknown command and another contract major");
+    await page.evaluate((id) => window.attack({ type: "goto", id }), order[0]);
+    await quiet("a goto from a frame of the host origin that is not the parent");
+    if ((await hashOf(viewer)) !== order[2]) fail(`a frame that is not the parent moved the viewer to #${await hashOf(viewer)}`);
+
+    await wrong.waitForFunction(() => !document.getElementById("app").hasAttribute("aria-busy"));
+    await page.evaluate((id) => window.sendWrong({ type: "goto", id }), order[3]);
+    await sleep(500);
+    if ((await hashOf(wrong)) !== order[0]) fail(`a viewer framed with another host origin took a command from this host: it is at #${await hashOf(wrong)}`);
+    const strays = await page.evaluate(() => window.strays.filter((entry) => entry.fromWrong).length);
+    if (strays) fail(`a viewer framed with another host origin sent ${strays} message(s) to this host`);
+
+    await viewer.locator(".strip-item button").nth(1).click();
+    await waitMessage("a click on the strip", isSlide(1));
+    await page.keyboard.press("ArrowRight");
+    await waitMessage("→ in the viewer frame", isSlide(2));
+    for (const key of ["o", "?"]) {
+      await page.keyboard.press(key);
+      if (await viewer.locator("dialog[open]").count()) fail(`${key} opened a dialog in embed mode`);
+    }
+
+    await page.evaluate(() => window.send({ type: "scheme", scheme: "dark" }));
+    await waitMessage("scheme dark", (message) => message.type === "outline" && message.outline.theme.scheme === "dark");
+    if ((await viewer.evaluate(() => document.documentElement.dataset.scheme)) !== "dark") fail("scheme dark did not switch the viewer");
+    await page.evaluate(() => window.send({ type: "scheme", scheme: "light" }));
+    await waitMessage("scheme light", (message) => message.type === "outline" && message.outline.theme.scheme === "light");
+
+    await writeFile(missingFile, missingText);
+    await waitMessage(`${missingId} published`, (message) => message.type === "outline" && message.outline.slides.every((slide) => !slide.missing), 20000);
+
+    await page.click("#present");
+    if (!(await viewer.waitForFunction(() => document.fullscreenElement === document.documentElement, null, { timeout: 5000 }).then(() => true, () => false))) fail("present from a click in the host did not make the viewer fullscreen");
+    else if ((await viewer.evaluate(() => getComputedStyle(document.querySelector(".strip")).display)) !== "none") fail("the strip stays visible in fullscreen");
+    await viewer.evaluate(() => document.exitFullscreen());
+
+    await page.evaluate(() => window.send({ type: "print" }));
+    await sleep(300);
+    const pages = await viewer.locator("#print-root .print-page").count();
+    if (pages !== order.length) fail(`print built ${pages} pages for ${order.length} slides`);
+
+    // The presenter window the viewer opens, and one the host page opens itself, follow the embedded
+    // viewer and lead it. A second viewer of the deck would answer the presenter too.
+    await page.evaluate(() => document.getElementById("wrong").remove());
+    for (const [button, startIndex, label] of [["#presenter", 2, "the presenter command"], ["#open-presenter", 3, "a presenter window the host opened"]]) {
+      const [presenter] = await Promise.all([context.waitForEvent("page"), page.click(button)]);
+      await presenter.waitForFunction(() => !document.getElementById("app").hasAttribute("aria-busy"));
+      if (!(await textIs(presenter, ".pv-counter", `${startIndex + 1} / ${order.length}`))) fail(`${label}: the presenter shows ${await presenter.locator(".pv-counter").textContent()}, expected slide ${startIndex + 1}`);
+      const target = startIndex === 2 ? 3 : 2;
+      await page.evaluate((id) => window.send({ type: "goto", id }), order[target]);
+      await waitMessage(`${label}: goto`, isSlide(target));
+      if (!(await textIs(presenter, ".pv-counter", `${target + 1} / ${order.length}`))) fail(`${label}: the presenter did not follow the viewer to slide ${target + 1}`);
+      await presenter.keyboard.press("ArrowLeft");
+      await waitMessage(`${label}: ← in the presenter`, isSlide(target - 1));
+      await closePage(presenter);
+      await page.evaluate((id) => window.send({ type: "goto", id }), order[3]);
+      await waitMessage(`${label}: back to the last slide`, isSlide(3));
+    }
+    for (const frame of page.frames()) {
+      const keys = await frame.evaluate((prefix) => Object.keys(window).filter((key) => key.startsWith(prefix)), MARKER_PREFIX).catch(() => []);
+      for (const key of keys) record.markers.push(`${key} set in ${frame.url()}`);
+    }
+  } finally {
+    await context.close();
+    await site.close();
+    await new Promise((resolve) => hostServer.close(resolve));
+    await rm(dataDir, { recursive: true, force: true });
+  }
+  // The browser refuses the posts of the viewer framed with another host origin, and logs each refusal.
+  problems.push(...record.errors.filter((line) => !line.includes("'https://wrong.invalid'")).map((line) => `host protocol: ${line}`));
+  problems.push(...record.markers.map((line) => `host protocol: execution marker: ${line}`));
+}
+
 // Serves one deck with the candidate package and checks everything but the visual diff.
 const stepsOf = (report) => report.slides.map((slide) => slide.steps || 0);
 
@@ -582,6 +787,8 @@ async function runCandidate(browser, deck, version, diff) {
     await interact(context, site, deck, steps, problems);
     if (deck.expect.navigate) await navigate(context, site, deck, steps, shots, diff, problems);
     if (deck.expect.activate) await activate(context, site, deck);
+    if (deck.expect.embed) await embedProtocol(browser, deck, version, problems);
+    if (existsSync(path.join(deck.dir, "type"))) problems.push(...await checkThemeFiles([path.join(deck.dir, "type"), CANDIDATE_DIR], `${deck.name}/type`));
     for (const page of context.pages()) await collectMarkers(page);
   } finally {
     await context.close();
@@ -620,6 +827,9 @@ async function main() {
   const viewer = await readFile(path.join(CANDIDATE_DIR, "viewer.js"), "utf8");
   const declared = /const TYPE_VERSION = "([^"]+)"/.exec(viewer)?.[1];
   if (declared !== candidate.text) failures.push(`viewer.js TYPE_VERSION is ${JSON.stringify(declared)}, type.json version is ${candidate.text}: repin detection compares the two`);
+  const declaredName = /const TYPE_NAME = "([^"]+)"/.exec(viewer)?.[1];
+  if (declaredName !== manifest.name) failures.push(`viewer.js TYPE_NAME is ${JSON.stringify(declaredName)}, type.json name is ${manifest.name}: repin detection and the host protocol use it`);
+  failures.push(...await checkThemeFiles([CANDIDATE_DIR], TYPE));
 
   const baselineRef = opts.baseline === "none" ? null : opts.baseline ?? pickBaseline(candidate);
   if (opts.base) checkVersion(candidate, "base", opts.base, failures);

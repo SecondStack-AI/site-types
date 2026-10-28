@@ -2,6 +2,8 @@
 // site's origin"): the package's index.html at /, its other files under /_type/ with the strong ETag
 // "<version>-<sha256>" and `private, no-cache`, and every other path from the site's own data with
 // `no-store`. /api/probe records a hit and answers 204, so payload decks can report a request.
+// A site directory may hold `type/`, files served under /_type/ in place of the package's, as a fork
+// of the package would ship them (a deck's own slides.json and theme assets).
 //
 //   node checks/serve.mjs <site-dir> [--package slides] [--port 8765]
 
@@ -79,7 +81,7 @@ export async function serveSite({ packageDir, dataDir, host = "127.0.0.1", port 
   };
 
   const serveTypeFile = async (req, res, rel) => {
-    const bytes = await readFileIfPresent(path.join(packageDir, rel));
+    const bytes = await readFileIfPresent(path.join(dataDir, "type", rel)) ?? await readFileIfPresent(path.join(packageDir, rel));
     if (!bytes) return send(req, res, 404, { "Content-Type": "text/plain" }, "404 page not found\n");
     if (!hashes.has(rel)) hashes.set(rel, createHash("sha256").update(bytes).digest("hex"));
     const etag = `"${version}-${hashes.get(rel)}"`;
@@ -106,7 +108,7 @@ export async function serveSite({ packageDir, dataDir, host = "127.0.0.1", port 
       }
       if (decoded.startsWith("/api/")) return send(req, res, 404, { "Content-Type": "text/plain" }, "404 page not found\n");
       const rel = decoded.slice(1) + (decoded.endsWith("/") ? "index.html" : "");
-      const bytes = await readFileIfPresent(path.join(dataDir, rel));
+      const bytes = rel.startsWith("type/") ? null : await readFileIfPresent(path.join(dataDir, rel));
       if (!bytes) return send(req, res, 404, { "Content-Type": "text/plain", "Cache-Control": "no-store" }, "404 page not found\n");
       return send(req, res, 200, {
         "Content-Type": CONTENT_TYPES[path.extname(rel).toLowerCase()] || "application/octet-stream",

@@ -1,0 +1,33 @@
+{
+  "contract": 1,
+  "defaultTheme": "default",
+  "themes": [
+    {
+      "id": "default",
+      "title": "Default",
+      "description": "Blue on cool white or deep slate, Inter",
+      "scheme": "light",
+      "colors": {
+        "light": {
+          "background": "oklch(0.992 0.002 250)",
+          "surface": "oklch(0.962 0.005 255)",
+          "foreground": "oklch(0.2 0.012 258)",
+          "muted": "oklch(0.5 0.016 256)",
+          "accent": "oklch(0.56 0.135 238)",
+          "onAccent": "oklch(0.995 0 0)",
+          "border": "oklch(0.89 0.007 258)"
+        },
+        "dark": {
+          "background": "oklch(0.172 0.009 258)",
+          "surface": "oklch(0.222 0.012 257)",
+          "foreground": "oklch(0.966 0.004 248)",
+          "muted": "oklch(0.73 0.014 252)",
+          "accent": "oklch(0.775 0.135 230)",
+          "onAccent": "oklch(0.172 0.009 258)",
+          "border": "oklch(0.37 0.016 257)"
+        }
+      },
+      "preview": "themes/default.png"
+    }
+  ]
+}

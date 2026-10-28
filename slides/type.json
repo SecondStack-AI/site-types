@@ -1,7 +1,7 @@
 {
   "format": 1,
   "name": "slides",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "title": "Slides",
   "description": "A presentation deck: one HTML section per slide, shown in a 16:9 viewer with overview, presenter view, fullscreen and print to PDF.",
   "data": ["project/"]

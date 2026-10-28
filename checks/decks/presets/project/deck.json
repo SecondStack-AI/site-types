@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "title": "Theme preset",
+  "lang": "en",
+  "order": ["cover", "cards", "part", "statement", "code"],
+  "sections": { "part": { "title": "Second part", "start": "part" } },
+  "theme": { "preset": "sample", "light": { "accent": "#0A7D55" } }
+}

@@ -1,0 +1,9 @@
+/* A fork-shaped theme stylesheet: shape tokens on the document root, decorative rules in the slides. */
+:root[data-preset="sample"] {
+  --heading-weight-shift: 50;
+  --heading-tracking: 0.4;
+  --radius-scale: 0;
+  --eyebrow-tracking: 0.3em;
+}
+:where([data-preset="sample"][data-layout="title"]) > section { border-left: 32px solid var(--accent); }
+:where([data-preset="sample"]) :where(h2)::after { content: ""; display: block; width: 96px; height: 8px; margin-top: 28px; background: var(--accent); }
