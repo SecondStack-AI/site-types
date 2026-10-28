@@ -885,7 +885,7 @@ async function loadSlide(id, force) {
   const edit = pendingEdits.get(id);
   if (edit) {
     if (result.text === edit.latest) pendingEdits.delete(id);
-    else if (result.text === edit.base || edit.posted.has(result.text)) return false;
+    else if ((result.text === edit.base || edit.posted.has(result.text)) && edit.stale++ < PENDING_EDIT_REFRESHES) return false;
     else pendingEdits.delete(id);
   }
   if (current && current.text === result.text) return false;
@@ -934,6 +934,7 @@ async function refresh(force) {
     if (deckPatch) Object.assign(state, deckPatch);
     if (state.deckStatus === "ok") {
       for (const id of state.slides.keys()) if (!state.deck.order.includes(id)) state.slides.delete(id);
+      for (const id of pendingEdits.keys()) if (!state.deck.order.includes(id)) pendingEdits.delete(id);
     }
     const orderChanged = previousIds.join("\n") !== (state.deck?.order || []).join("\n");
     if (deckChanged || orderChanged || changedSlides.size) onDataChanged({ deckChanged, orderChanged, changedSlides, shownId });
@@ -1311,9 +1312,9 @@ function go(index, { from = "local", step = 0 } = {}) {
   state.index = next;
   state.step = nextStep;
   syncHash();
+  reportSlide();
   view.render?.({ moved, stepped, full: false });
   if (from === "local") sync.post({ kind: "goto", id: currentId(), step: state.step });
-  reportSlide();
 }
 
 // Forward reveals the next step before it leaves the slide; back hides the last step, and coming back
@@ -2233,8 +2234,11 @@ function showBanner(text, detail) {
 // written back into the slide file's own markup, sanitized and sent to the host as `edited`, which
 // saves the file. The viewer shows the edit at once and keeps it while refreshes still return older
 // file versions; a version from another writer wins.
-const editing = { on: false, frame: null, text: "", id: null, timer: null };
-const pendingEdits = new Map(); // slide id -> { base, posted: Set, latest }
+const editing = { on: false, frame: null, text: "", id: null, timer: null, dirty: false, baseline: "" };
+const pendingEdits = new Map(); // slide id -> { base, posted: Set, latest, stale }
+// A host that never saves an edit (a failed save, a lost message) must not pin it on the stage: after
+// this many refreshes that still return an older file, the file wins again.
+const PENDING_EDIT_REFRESHES = 3;
 const EDIT_SKIP = "svg, math, iframe, video, audio, canvas, img, picture, object, embed, aside, style, select, textarea, input, button";
 const EDIT_SHEET = new CSSStyleSheet();
 EDIT_SHEET.replaceSync(`[data-slides-edit] { cursor: text; outline: 3px dashed color-mix(in oklab, var(--accent) 45%, transparent); outline-offset: 10px; border-radius: 4px; }
@@ -2256,36 +2260,47 @@ function editableBlocks(section) {
   return blocks;
 }
 
+// Tells the host how many blocks of the slide on the stage can be edited (0 for a slide that is not
+// written yet or is malformed).
 function makeEditable(host, index) {
   const id = state.deck.order[index];
   const slide = state.slides.get(id);
   const frame = host.shadowRoot?.querySelector(".frame");
-  editing.frame = null;
-  if (!frame || slide?.status !== "ok") return;
+  clearTimeout(editing.timer);
+  Object.assign(editing, { frame: null, dirty: false });
+  if (!frame || slide?.status !== "ok") return postToHost("editable", { id, count: 0 });
   host.shadowRoot.adoptedStyleSheets = [...host.shadowRoot.adoptedStyleSheets, EDIT_SHEET];
-  for (const block of editableBlocks(frame.querySelector(":scope > section"))) {
+  const blocks = editableBlocks(frame.querySelector(":scope > section"));
+  for (const block of blocks) {
     block.setAttribute("contenteditable", "plaintext-only");
     block.setAttribute("data-slides-edit", "");
   }
-  // The file text this frame was built from: its node numbers index that text's elements.
+  // The file text this frame was built from (its node numbers index that text's elements), and the
+  // file this frame gives before any typing: only a different result is a hand edit.
   Object.assign(editing, { frame, id, text: slide.text });
+  editing.baseline = editSlideFile(slide.text, frame);
   frame.addEventListener("input", () => {
+    editing.dirty = true;
     clearTimeout(editing.timer);
     editing.timer = setTimeout(flushEdit, 800);
   });
   frame.addEventListener("focusout", flushEdit);
+  postToHost("editable", { id, count: blocks.length });
 }
 
 function flushEdit() {
   clearTimeout(editing.timer);
-  if (!editing.frame?.isConnected) return;
+  if (!editing.frame?.isConnected || !editing.dirty) return;
+  editing.dirty = false;
   const { id } = editing;
   const html = editSlideFile(editing.text, editing.frame);
   const slide = state.slides.get(id);
-  if (!slide || html === slide.text) return;
-  const pending = pendingEdits.get(id) || { base: slide.text, posted: new Set(), latest: null };
+  if (!slide || html === editing.baseline) return;
+  editing.baseline = html;
+  const pending = pendingEdits.get(id) || { base: slide.text, posted: new Set(), latest: null, stale: 0 };
   pending.posted.add(html);
   pending.latest = html;
+  pending.stale = 0;
   pendingEdits.set(id, pending);
   state.slides.set(id, { id, text: html, ...parseSlide(id, html) });
   postToHost("edited", { id, path: `project/slides/${id}.html`, html });
@@ -2295,10 +2310,12 @@ function flushEdit() {
 
 // The file's section with the text of every edited block taken from the stage. Elements inside a
 // block keep the file's own tag and attributes; markup the editor added is reduced to <br> and text.
+// A <style> before the section, which rendering applies too, moves into the section.
 function editSlideFile(fileText, frame) {
   const doc = new DOMParser().parseFromString(fileText, "text/html");
   const section = [...doc.body.children].find((node) => node.localName === "section");
   const sourceNodes = [...section.querySelectorAll("*")];
+  const headStyles = [...doc.head.querySelectorAll("style")];
   const restore = (node) => {
     if (node.nodeType === Node.TEXT_NODE) return [doc.createTextNode(node.data)];
     if (node.nodeType !== Node.ELEMENT_NODE) return [];
@@ -2312,11 +2329,13 @@ function editSlideFile(fileText, frame) {
   for (const block of frame.querySelectorAll("[data-slides-edit]")) {
     sourceNodes[Number(block.getAttribute(NODE_ATTR))]?.replaceChildren(...[...block.childNodes].flatMap(restore));
   }
+  section.prepend(...headStyles);
   return `${sanitizeSlideFile(section)}\n`;
 }
 
-// The same sanitizer as rendering, in file mode. Slide CSS keeps its text unless the CSS sanitizer
-// drops something; then the cleaned rules replace it.
+// The same sanitizer as rendering, in file mode. Slide CSS keeps its text as written: rendering sanitizes
+// it on every load, and text parsed out of a <style> cannot contain the tag's end, so it writes back
+// unchanged. Re-serializing the CSSOM instead would resolve escapes into markup.
 function sanitizeSlideFile(section) {
   const styles = [...section.querySelectorAll("style")];
   for (const style of styles) style.remove();
@@ -2328,11 +2347,8 @@ function sanitizeSlideFile(section) {
     sanitizingFile = false;
   }
   for (const style of styles.reverse()) {
-    const issues = [];
-    const sheet = sanitizeStylesheet(style.textContent, issues);
-    const css = issues.length ? [...sheet.cssRules].map((rule) => rule.cssText).join("\n") : style.textContent;
     const element = clean.ownerDocument.createElement("style");
-    element.textContent = css;
+    element.textContent = style.textContent;
     clean.prepend(element);
   }
   return clean.outerHTML;
@@ -2350,9 +2366,9 @@ function setEditing(on) {
 }
 
 // Embed mode's host protocol. The host frames /?embed=1&host=<its origin>#<slide id> and exchanges
-// {slides: CONTRACT, type, ...} messages with the viewer. The envelope owns `slides` and `type`, so `ready`
-// names the site type `siteType`, and `ready` and `outline` carry the outline as `outline`. Commands are taken only from the parent window
-// at the host origin, and messages go only to the parent with the host origin as target, never "*";
+// {slides: CONTRACT, type, ...} messages with the viewer. The envelope owns `slides` and `type`, so
+// `ready` names the site type `siteType`, and `ready` and `outline` carry the outline as `outline`.
+// Commands are taken only from the parent window at the host origin, and messages go only to the parent with the host origin as target, never "*";
 // who may frame a private deck is Spot's frame-ancestors policy. Unknown types are ignored.
 const embedHost = { ready: false, outline: "", slide: "" };
 

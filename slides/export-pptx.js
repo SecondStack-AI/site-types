@@ -366,7 +366,16 @@ class SlideWriter {
     const pad = cs.boxShadow !== "none" ? 40 : 0;
     const bgUrls = [...cs.backgroundImage.matchAll(/url\("([^"]+)"\)/g)].map((m) => m[1]);
     let css = style;
-    for (const url of bgUrls) css = css.replaceAll(url, await dataUrl(url));
+    // An image that cannot be fetched (cross-origin without CORS, gone) is left out; the rest of the
+    // decoration, such as a gradient over it, is still drawn.
+    for (const url of bgUrls) {
+      const data = await dataUrl(url);
+      if (data) css = css.replaceAll(url, data);
+      else {
+        css = css.replaceAll(`url("${url}")`, "none");
+        this.warn("image-unavailable");
+      }
+    }
     // Large decorations are smooth gradients; 1x keeps the file small.
     const scale = box.w * box.h > 400000 ? 1 : 2;
     const png = await rasterize(`<div xmlns="http://www.w3.org/1999/xhtml" style="position:absolute;left:${pad}px;top:${pad}px;width:${box.w}px;height:${box.h}px;${escapeAttr(css)}"></div>`, box.w + pad * 2, box.h + pad * 2, scale);
@@ -552,7 +561,8 @@ function escapeAttr(text) {
 
 async function dataUrl(url) {
   if (/^data:[^,]*;base64,/i.test(url)) return url;
-  const blob = await fetch(url, { credentials: "same-origin" }).then((r) => (r.ok ? r.blob() : null));
+  const response = await fetch(url, { credentials: "same-origin" }).catch(() => null); // refused: the caller warns
+  const blob = response?.ok ? await response.blob() : null;
   if (!blob) return null;
   return new Promise((resolve) => {
     const reader = new FileReader();

@@ -1,6 +1,9 @@
 {
-  "embed": { "missing": "results", "edit": "agenda" },
-  "warnings": { "agenda": [{ "code": "unsafe-removed", "removed": ["onclick"] }] },
+  "embed": { "missing": "results", "edit": "agenda", "headStyle": "next" },
+  "warnings": {
+    "agenda": [{ "code": "unsafe-removed", "removed": ["onclick"] }, { "code": "css-url-removed", "count": 1 }],
+    "next": ["style-outside-section"]
+  },
   "notes": { "agenda": "Keep this short." },
   "steps": { "agenda": 1 }
 }

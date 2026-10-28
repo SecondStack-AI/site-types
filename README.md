@@ -66,7 +66,8 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 | `ready` | `contract`, `siteType` (`name`, `version`), `outline`; sent again after the viewer reloads |
 | `outline` | `outline`: `title`, `theme` (`preset`, `scheme`), `slides` (`id`, `title`, `section` title or `null`, `missing`); after any change |
 | `slide` | `id`, `index` of the current slide |
-| `edited` | `id`, `path` (`project/slides/<id>.html`), `html`: the whole slide file after a hand edit, sanitized; the host saves it |
+| `edited` | `id`, `path` (`project/slides/<id>.html`), `html`: the whole slide file after a hand edit, sanitized; the host saves it byte for byte |
+| `editable` | `id`, `count`: in edit mode, how many text blocks of the slide on the stage can be edited, `0` for a slide not written yet or malformed |
 | `exporting` | `done`, `total` slides while an export runs |
 | `exported` | `format` (`pptx`), `filename`, `bytes` (an `ArrayBuffer`, transferred), `warnings`: `[{ code, slides }]` for what did not map exactly |
 | `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid`, `export-busy`, `export-failed` |
@@ -82,9 +83,9 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 
 Unknown types and messages of another `slides` major are ignored. In embed mode the viewer's own keys for fullscreen, overview and help are off.
 
-A hand edit is written back into the slide file's own markup: only the edited text changes, and the file's style, notes, attributes and relative URLs stay. The viewer shows the edit at once and keeps it while refreshes still return an older version of the file; a version from another writer replaces it.
+A hand edit is written back into the slide file's own markup: only the edited text changes, and the file's attributes, notes and relative URLs stay. `<style>` text is kept as written, and a `<style>` before the section moves into it, so the slide looks the same. Only typing sends `edited`: switching edit mode or moving between slides sends nothing, and neither does a text typed and then restored. The viewer shows the edit at once and keeps it while refreshes still return an older version of the file, for at most three such refreshes; a version from another writer replaces it at once.
 
-The PowerPoint export (`export`, or the download button of the viewer's toolbar) keeps text, lists and tables editable and adds the notes. Fonts are referenced, not embedded, so a recipient without the deck fonts sees substitutes. Decorations that PowerPoint shapes cannot express become pictures, and builds and animations are not exported; `warnings` names the slides concerned (`rasterized-decoration`, `image-fit-baked`, `image-radius-dropped`, `radius-approximated`, `outline-dropped`, `app-without-poster`, `raster-failed`, `picture-failed`).
+The PowerPoint export (`export`, or the download button of the viewer's toolbar) keeps text, lists and tables editable and adds the notes. Fonts are referenced, not embedded, so a recipient without the deck fonts sees substitutes. Decorations that PowerPoint shapes cannot express become pictures, and builds and animations are not exported; `warnings` names the slides concerned (`rasterized-decoration`, `image-fit-baked`, `image-radius-dropped`, `radius-approximated`, `outline-dropped`, `app-without-poster`, `image-unavailable` for a background image that cannot be fetched and is left out, `raster-failed`, `picture-failed`).
 
 The host opens the presenter window itself, in its click handler: `window.open("https://<site>/?presenter=1#<slide id>")`, without `noopener`. That window finds the embedded viewer through its opener's frames, and the two follow each other through window references, since storage partitioning keeps them on different `BroadcastChannel`s.
 

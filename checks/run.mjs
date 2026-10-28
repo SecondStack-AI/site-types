@@ -630,20 +630,53 @@ async function checkThemeFiles(dirs, label) {
   return problems;
 }
 
-// Edit mode: a text typed on the stage comes back as the slide file, sanitized, with the file's own
-// markup, style, notes and relative URLs kept; the viewer shows it at once, keeps it through a refresh
-// that still returns the old file and through the host's save, and takes a version from another writer.
-async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, fail }) {
+// Edit mode, on the deck's `edit` slide and its `headStyle` slide (a <style> before the section):
+// - toggling edit mode or moving between slides without typing sends nothing;
+// - a typed text comes back as the slide file, sanitized, with the file's markup, notes, relative URLs
+//   and <style> text kept verbatim (also a style the CSS sanitizer trims), and a second edit changes
+//   only its own text; a head <style> moves into the section, so the look is kept;
+// - the stage keeps an edit through a refresh that returns the old file and through the host's save,
+//   gives it up after three refreshes without the save, and takes a version from another writer.
+async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, noMessage, fail }) {
   const id = deck.expect.embed.edit;
   const index = deck.order.indexOf(id);
   const file = path.join(dataDir, "project", "slides", `${id}.html`);
+  const styleText = /<style>[\s\S]*?<\/style>/.exec(await readFile(file, "utf8"))[0];
   const stage = viewer.locator(".stage .slide-host");
-  await page.evaluate((target) => window.send({ type: "goto", id: target }), id);
-  await waitMessage("goto before editing", (message) => message.type === "slide" && message.id === id);
-  await page.evaluate(() => window.send({ type: "edit", on: "yes" }));
+  const send = (message) => page.evaluate((m) => window.send(m), message);
+  const isSlide = (target) => (message) => message.type === "slide" && message.id === target;
+  const editableOn = (target) => (message) => message.type === "editable" && message.id === target;
+  const editableCount = () => viewer.evaluate(() => document.querySelector(".stage .slide-host").shadowRoot.querySelectorAll("[contenteditable]").length);
+  const typeInto = async (locator, keys, text) => {
+    await locator.click();
+    await page.keyboard.press(keys);
+    await page.keyboard.type(text);
+    await locator.evaluate((el) => { el.__kept = true; el.blur(); });
+  };
+  const keeps = async (label, locator, text) => {
+    await sleep(800);
+    const state = await locator.evaluate((el) => ({ kept: el.__kept === true, text: el.textContent }));
+    if (!state.kept || state.text !== text) fail(`${label}: the stage shows ${JSON.stringify(state.text)}${state.kept ? "" : ", rebuilt"}`);
+  };
+
+  await send({ type: "goto", id });
+  await waitMessage("goto before editing", isSlide(id));
+  await send({ type: "edit", on: "yes" });
   await waitMessage("edit without a boolean", (message) => message.type === "error" && message.code === "command-invalid");
-  await page.evaluate(() => window.send({ type: "edit", on: true }));
-  if (!(await stage.locator("h2[contenteditable]").waitFor({ timeout: 5000 }).then(() => true, () => false))) return fail("edit on made no heading editable");
+  await send({ type: "edit", on: true });
+  const announced = await waitMessage("editable", editableOn(id));
+  if (announced && (!announced.count || announced.count !== await editableCount())) fail(`editable says ${announced.count} block(s), the stage has ${await editableCount()}`);
+  await send({ type: "edit", on: false });
+  await noMessage("edit on and off without typing", "edited");
+  await send({ type: "edit", on: true });
+  await waitMessage("editable again", editableOn(id));
+  const neighbour = deck.order[(index + 1) % deck.order.length];
+  await send({ type: "goto", id: neighbour });
+  await waitMessage("goto while editing", isSlide(neighbour));
+  await send({ type: "goto", id });
+  await waitMessage("goto back while editing", isSlide(id));
+  await noMessage("moving between slides while editing", "edited");
+
   const shown = await viewer.evaluate(() => {
     const root = document.querySelector(".stage .slide-host").shadowRoot;
     return { hidden: root.querySelectorAll("[data-step-hidden]").length, editable: [...root.querySelectorAll("[contenteditable]")].map((el) => el.localName) };
@@ -651,35 +684,55 @@ async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, fa
   if (shown.hidden) fail(`edit mode leaves ${shown.hidden} build step(s) hidden`);
   if (shown.editable.some((name) => ["img", "svg", "iframe", "section", "ol", "aside"].includes(name))) fail(`edit mode made ${shown.editable.join(", ")} editable`);
   const heading = stage.locator("h2");
-  await heading.click();
-  await page.keyboard.press("ControlOrMeta+a");
-  await page.keyboard.type("Plan");
-  await heading.evaluate((el) => { el.__kept = true; el.blur(); });
+  await typeInto(heading, "ControlOrMeta+a", "Plan");
   const edited = await waitMessage("edited", (message) => message.type === "edited" && message.id === id);
   if (edited) {
     const { html } = edited;
+    const markup = html.replace(styleText, "");
     if (edited.path !== `project/slides/${id}.html`) fail(`edited names the path ${edited.path}`);
-    const want = ["<h2>Plan</h2>", "<aside>Keep this short.</aside>", 'src="assets/dot.svg"', "<style>h2 { letter-spacing: -0.01em; }</style>", 'data-step="1"', "<em>Finance</em>"];
-    const unwanted = ["onclick", "Agenda", "data-slides", "contenteditable", "sandbox", "/project/", "data-step-hidden", "inert"];
-    for (const text of want) if (!html.includes(text)) fail(`edited html lacks ${text}: ${html}`);
-    for (const text of unwanted) if (html.includes(text)) fail(`edited html has ${text}: ${html}`);
+    const want = ["<h2>Plan</h2>", "<aside>Keep this short.</aside>", 'src="assets/dot.svg"', 'data-step="1"', "<em>Finance</em>"];
+    const unwanted = ["onclick", "onerror", "Agenda", "data-slides", "contenteditable", "sandbox", "/project/", "data-step-hidden", "inert", "<style"];
+    if (!html.includes(styleText)) fail(`edited html does not keep the slide's <style> text as written: ${html}`);
+    for (const text of want) if (!markup.includes(text)) fail(`edited html lacks ${text}: ${html}`);
+    for (const text of unwanted) if (markup.includes(text)) fail(`edited html has ${text} outside its <style>: ${html}`);
     if (!/^<section>[\s\S]*<\/section>\n$/.test(html)) fail(`edited html is not one section file: ${JSON.stringify(html)}`);
   }
   await waitMessage("outline after the edit", (message) => message.type === "outline" && message.outline.slides[index].title === "Plan");
-  const unchanged = async (label) => {
-    await sleep(800);
-    const state = await heading.evaluate((el) => ({ kept: el.__kept === true, text: el.textContent }));
-    if (!state.kept || state.text !== "Plan") fail(`${label}: the stage shows ${JSON.stringify(state.text)}${state.kept ? "" : ", rebuilt"}`);
-  };
   site.deploy(); // a refresh that still reads the old file
-  await unchanged("a refresh before the host saved");
+  await keeps("a refresh before the host saved", heading, "Plan");
   if (edited) await writeFile(file, edited.html);
   site.deploy();
-  await unchanged("the refresh after the host saved");
+  await keeps("the refresh after the host saved", heading, "Plan");
+  // The saved file comes back unchanged except for the next edit's own text.
+  await typeInto(stage.locator("em"), "End", " team");
+  const second = await waitMessage("a second edit", (message) => message.type === "edited" && message.id === id);
+  if (edited && second && second.html !== edited.html.replace("<em>Finance</em>", "<em>Finance team</em>")) fail(`a second edit changed more than its text: ${JSON.stringify(edited.html)} then ${JSON.stringify(second.html)}`);
+  if (second) await writeFile(file, second.html);
+  site.deploy();
+  await keeps("the refresh after the second save", heading, "Plan");
   await writeFile(file, (await readFile(file, "utf8")).replace("<h2>Plan</h2>", "<h2>Remote</h2>"));
   site.deploy();
   if (!(await stage.locator("h2[contenteditable]", { hasText: "Remote" }).waitFor({ timeout: 5000 }).then(() => true, () => false))) fail("a version from another writer did not replace the edit");
-  await page.evaluate(() => window.send({ type: "edit", on: false }));
+
+  const styled = deck.expect.embed.headStyle;
+  const headStyle = /<style>[\s\S]*?<\/style>/.exec(await readFile(path.join(dataDir, "project", "slides", `${styled}.html`), "utf8"))[0];
+  await send({ type: "goto", id: styled });
+  await waitMessage("goto the slide with a head style", isSlide(styled));
+  await waitMessage("editable on the slide with a head style", editableOn(styled));
+  const styledHeading = stage.locator("h2");
+  const before = await styledHeading.textContent();
+  await typeInto(styledHeading, "End", "!");
+  const carried = await waitMessage("edited with a head style", (message) => message.type === "edited" && message.id === styled);
+  if (carried && !/^<section[^>]*>/.test(carried.html.trimStart())) fail(`edited html does not start with the section: ${JSON.stringify(carried.html)}`);
+  if (carried && !carried.html.includes(headStyle)) fail(`edited html drops the head <style>: ${JSON.stringify(carried.html)}`);
+  for (let refresh = 1; refresh <= 3; refresh += 1) {
+    site.deploy();
+    await keeps(`unsaved edit, refresh ${refresh}`, styledHeading, `${before}!`);
+  }
+  site.deploy();
+  if (!(await viewer.waitForFunction((text) => document.querySelector(".stage .slide-host").shadowRoot.querySelector("h2")?.textContent === text, before, { timeout: 5000 }).then(() => true, () => false))) fail("an edit the host never saved outlived three refreshes");
+
+  await send({ type: "edit", on: false });
   if (!(await viewer.waitForFunction(() => !document.querySelector(".stage .slide-host").shadowRoot.querySelector("[contenteditable]"), null, { timeout: 5000 }).then(() => true, () => false))) fail("edit off left text editable");
 }
 
@@ -703,6 +756,8 @@ async function exportProtocol({ page, viewer, deck, waitMessage, fail }) {
   const pptx = await inspectPptx(viewer, bytes);
   if (pptx.count !== deck.order.length || pptx.problems.length) fail(`the exported file has ${pptx.count} slides and ${JSON.stringify(pptx.problems)}`);
   if (!pptx.notes.includes(deck.expect.notes[deck.expect.embed.edit])) fail(`the exported notes are ${JSON.stringify(pptx.notes)}`);
+  // results has a decoration whose background image cannot be fetched; its gradient is still exported.
+  if (!exported.warnings?.some((item) => item.code === "image-unavailable" && item.slides.includes(deck.expect.embed.missing))) fail(`exported warnings lack image-unavailable for ${deck.expect.embed.missing}: ${JSON.stringify(exported.warnings)}`);
 }
 
 // The host protocol (the C3 contract): the host page embed-host.html, served from 127.0.0.1, frames the
@@ -749,6 +804,13 @@ async function embedProtocol(browser, deck, version, problems) {
     fail(`${label}: no such message; after the last expected one the viewer sent ${JSON.stringify((await messages()).slice(cursor))}`);
     return null;
   };
+  const noMessage = async (label, type) => {
+    await sleep(700);
+    const list = await messages();
+    const found = list.slice(cursor).filter((message) => message.type === type);
+    if (found.length) fail(`${label}: the viewer sent ${JSON.stringify(found)}`);
+    cursor = list.length;
+  };
   const quiet = async (label) => {
     await sleep(700);
     const list = await messages();
@@ -774,6 +836,14 @@ async function embedProtocol(browser, deck, version, problems) {
       if (outline.slides.find((slide) => slide.id === missingId)?.section !== "Results" || outline.slides[0].section !== null) fail(`outline sections are ${JSON.stringify(outline.slides.map((slide) => slide.section))}`);
     }
     await waitMessage("the first slide message", isSlide(0));
+    // A slide that is not written yet has nothing to edit.
+    await page.evaluate((id) => window.send({ type: "goto", id }), missingId);
+    await waitMessage("goto the missing slide", (message) => message.type === "slide" && message.id === missingId);
+    await page.evaluate(() => window.send({ type: "edit", on: true }));
+    await waitMessage("editable on the missing slide", (message) => message.type === "editable" && message.id === missingId && message.count === 0);
+    await page.evaluate(() => window.send({ type: "edit", on: false }));
+    await page.evaluate((id) => window.send({ type: "goto", id }), order[0]);
+    await waitMessage("back to the first slide", isSlide(0));
 
     const layout = await viewer.evaluate(() => ({
       toolbar: Boolean(document.querySelector(".toolbar")),
@@ -859,14 +929,16 @@ async function embedProtocol(browser, deck, version, problems) {
     const pages = await viewer.locator("#print-root .print-page").count();
     if (pages !== order.length) fail(`print built ${pages} pages for ${order.length} slides`);
 
-    await editProtocol({ page, viewer, site, dataDir, deck, waitMessage, fail });
+    await editProtocol({ page, viewer, site, dataDir, deck, waitMessage, noMessage, fail });
     await exportProtocol({ page, viewer, deck, waitMessage, fail });
 
     // The presenter window the host page opens follows the embedded viewer and leads it. A second viewer
     // of the deck would answer the presenter too.
     await page.evaluate(() => document.getElementById("wrong").remove());
+    await page.evaluate((id) => window.send({ type: "goto", id }), order[0]);
+    await waitMessage("goto before the presenter", isSlide(0));
     await page.evaluate((id) => window.send({ type: "goto", id }), order[3]);
-    await waitMessage("goto before the presenter", isSlide(3));
+    await waitMessage("goto the presenter's start", isSlide(3));
     const [presenter] = await Promise.all([context.waitForEvent("page"), page.click("#open-presenter")]);
     await presenter.waitForFunction(() => !document.getElementById("app").hasAttribute("aria-busy"));
     if (!(await textIs(presenter, ".pv-counter", `4 / ${order.length}`))) fail(`the presenter window shows ${await presenter.locator(".pv-counter").textContent()}, not the viewer's slide 4`);
