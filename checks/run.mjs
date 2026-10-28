@@ -254,7 +254,7 @@ async function fulfilExternal(route, record, packageDir) {
 
 async function newContext(browser, record, packageDir) {
   const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, locale: "en-US", timezoneId: "UTC" });
-  await context.route((url) => url.hostname !== "127.0.0.1" && url.hostname !== "localhost", (route) => fulfilExternal(route, record, packageDir));
+  await context.route((url) => url.hostname !== "127.0.0.1" && url.hostname !== "localhost" && !url.hostname.endsWith(".localhost"), (route) => fulfilExternal(route, record, packageDir));
   context.on("page", (page) => watchPage(page, record));
   return context;
 }
@@ -630,9 +630,85 @@ async function checkThemeFiles(dirs, label) {
   return problems;
 }
 
-// The host protocol (the C3 contract): the host page embed-host.html, served from localhost so it is
-// another site than the deck on 127.0.0.1, frames the viewer and records what the viewer frame sends.
-// The deck starts with one listed slide missing, which is published during the run.
+// Edit mode: a text typed on the stage comes back as the slide file, sanitized, with the file's own
+// markup, style, notes and relative URLs kept; the viewer shows it at once, keeps it through a refresh
+// that still returns the old file and through the host's save, and takes a version from another writer.
+async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, fail }) {
+  const id = deck.expect.embed.edit;
+  const index = deck.order.indexOf(id);
+  const file = path.join(dataDir, "project", "slides", `${id}.html`);
+  const stage = viewer.locator(".stage .slide-host");
+  await page.evaluate((target) => window.send({ type: "goto", id: target }), id);
+  await waitMessage("goto before editing", (message) => message.type === "slide" && message.id === id);
+  await page.evaluate(() => window.send({ type: "edit", on: "yes" }));
+  await waitMessage("edit without a boolean", (message) => message.type === "error" && message.code === "command-invalid");
+  await page.evaluate(() => window.send({ type: "edit", on: true }));
+  if (!(await stage.locator("h2[contenteditable]").waitFor({ timeout: 5000 }).then(() => true, () => false))) return fail("edit on made no heading editable");
+  const shown = await viewer.evaluate(() => {
+    const root = document.querySelector(".stage .slide-host").shadowRoot;
+    return { hidden: root.querySelectorAll("[data-step-hidden]").length, editable: [...root.querySelectorAll("[contenteditable]")].map((el) => el.localName) };
+  });
+  if (shown.hidden) fail(`edit mode leaves ${shown.hidden} build step(s) hidden`);
+  if (shown.editable.some((name) => ["img", "svg", "iframe", "section", "ol", "aside"].includes(name))) fail(`edit mode made ${shown.editable.join(", ")} editable`);
+  const heading = stage.locator("h2");
+  await heading.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("Plan");
+  await heading.evaluate((el) => { el.__kept = true; el.blur(); });
+  const edited = await waitMessage("edited", (message) => message.type === "edited" && message.id === id);
+  if (edited) {
+    const { html } = edited;
+    if (edited.path !== `project/slides/${id}.html`) fail(`edited names the path ${edited.path}`);
+    const want = ["<h2>Plan</h2>", "<aside>Keep this short.</aside>", 'src="assets/dot.svg"', "<style>h2 { letter-spacing: -0.01em; }</style>", 'data-step="1"', "<em>Finance</em>"];
+    const unwanted = ["onclick", "Agenda", "data-slides", "contenteditable", "sandbox", "/project/", "data-step-hidden", "inert"];
+    for (const text of want) if (!html.includes(text)) fail(`edited html lacks ${text}: ${html}`);
+    for (const text of unwanted) if (html.includes(text)) fail(`edited html has ${text}: ${html}`);
+    if (!/^<section>[\s\S]*<\/section>\n$/.test(html)) fail(`edited html is not one section file: ${JSON.stringify(html)}`);
+  }
+  await waitMessage("outline after the edit", (message) => message.type === "outline" && message.outline.slides[index].title === "Plan");
+  const unchanged = async (label) => {
+    await sleep(800);
+    const state = await heading.evaluate((el) => ({ kept: el.__kept === true, text: el.textContent }));
+    if (!state.kept || state.text !== "Plan") fail(`${label}: the stage shows ${JSON.stringify(state.text)}${state.kept ? "" : ", rebuilt"}`);
+  };
+  site.deploy(); // a refresh that still reads the old file
+  await unchanged("a refresh before the host saved");
+  if (edited) await writeFile(file, edited.html);
+  site.deploy();
+  await unchanged("the refresh after the host saved");
+  await writeFile(file, (await readFile(file, "utf8")).replace("<h2>Plan</h2>", "<h2>Remote</h2>"));
+  site.deploy();
+  if (!(await stage.locator("h2[contenteditable]", { hasText: "Remote" }).waitFor({ timeout: 5000 }).then(() => true, () => false))) fail("a version from another writer did not replace the edit");
+  await page.evaluate(() => window.send({ type: "edit", on: false }));
+  if (!(await viewer.waitForFunction(() => !document.querySelector(".stage .slide-host").shadowRoot.querySelector("[contenteditable]"), null, { timeout: 5000 }).then(() => true, () => false))) fail("edit off left text editable");
+}
+
+// Export: progress per slide, then the file, transferred, with its warnings.
+async function exportProtocol({ page, viewer, deck, waitMessage, fail }) {
+  await page.evaluate(() => window.send({ type: "export", format: "pdf" }));
+  await waitMessage("export of another format", (message) => message.type === "error" && message.code === "command-invalid");
+  await page.evaluate(() => window.send({ type: "export", format: "pptx" }));
+  await waitMessage("exporting", (message) => message.type === "exporting" && message.total === deck.order.length && message.done === deck.order.length, 30000);
+  const exported = await waitMessage("exported", (message) => message.type === "exported", 30000);
+  if (!exported) return;
+  if (exported.format !== "pptx" || exported.filename !== `${deck.title}.pptx` || !exported.bytes) fail(`exported is ${JSON.stringify(exported)}`);
+  if (!Array.isArray(exported.warnings) || exported.warnings.some((item) => typeof item.code !== "string" || !Array.isArray(item.slides))) fail(`exported warnings are ${JSON.stringify(exported.warnings)}`);
+  const bytes = Buffer.from(await page.evaluate(() => {
+    const data = window.received.findLast((entry) => entry.data.type === "exported").data;
+    let text = "";
+    const view = new Uint8Array(data.bytes);
+    for (let i = 0; i < view.length; i += 0x8000) text += String.fromCharCode(...view.subarray(i, i + 0x8000));
+    return btoa(text);
+  }), "base64");
+  const pptx = await inspectPptx(viewer, bytes);
+  if (pptx.count !== deck.order.length || pptx.problems.length) fail(`the exported file has ${pptx.count} slides and ${JSON.stringify(pptx.problems)}`);
+  if (!pptx.notes.includes(deck.expect.notes[deck.expect.embed.edit])) fail(`the exported notes are ${JSON.stringify(pptx.notes)}`);
+}
+
+// The host protocol (the C3 contract): the host page embed-host.html, served from 127.0.0.1, frames the
+// viewer from deck.localhost, another site, and records what the viewer frame sends. On a host name the
+// viewer subscribes to deploy events, so every refresh here is deploy-driven. The deck starts with one
+// listed slide missing, which is published during the run, and a hand edit is saved as a host would.
 async function embedProtocol(browser, deck, version, problems) {
   const fail = (text) => problems.push(`host protocol: ${text}`);
   const order = deck.order;
@@ -646,12 +722,13 @@ async function embedProtocol(browser, deck, version, problems) {
   const missingText = await readFile(missingFile);
   await rm(missingFile);
   const site = await serveSite({ packageDir: CANDIDATE_DIR, dataDir });
+  const siteUrl = `http://deck.localhost:${site.port}`;
   const hostPage = await readFile(path.join(HERE, "embed-host.html"));
   const hostServer = createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     res.end(hostPage);
   });
-  await new Promise((resolve) => hostServer.listen(0, "localhost", resolve));
+  await new Promise((resolve) => hostServer.listen(0, "127.0.0.1", resolve));
   const record = { errors: [], markers: [] };
   const context = await newContext(browser, record, CANDIDATE_DIR);
   // A browser that partitions storage keeps an embedded viewer and its presenter window on different
@@ -659,7 +736,7 @@ async function embedProtocol(browser, deck, version, problems) {
   await context.addInitScript(() => { delete window.BroadcastChannel; });
   let cursor = 0;
   const page = await context.newPage();
-  const messages = () => page.evaluate(() => window.received.map((entry) => entry.data));
+  const messages = () => page.evaluate(() => window.received.map(({ data }) => (data?.bytes instanceof ArrayBuffer ? { ...data, bytes: data.bytes.byteLength } : data)));
   const waitMessage = async (label, test, timeout = 5000) => {
     for (const until = Date.now() + timeout; Date.now() < until; await sleep(50)) {
       const list = await messages();
@@ -680,7 +757,7 @@ async function embedProtocol(browser, deck, version, problems) {
   };
   const isSlide = (index) => (message) => message.type === "slide" && message.id === order[index] && message.index === index;
   try {
-    await page.goto(`http://localhost:${hostServer.address().port}/?site=${encodeURIComponent(site.url)}&id=${order[0]}`);
+    await page.goto(`http://127.0.0.1:${hostServer.address().port}/?site=${encodeURIComponent(siteUrl)}&id=${order[0]}`);
     const ready = await waitMessage("ready", (message) => message.type === "ready");
     const viewer = await (await page.$("#viewer")).contentFrame();
     const wrong = await (await page.$("#wrong")).contentFrame();
@@ -717,7 +794,7 @@ async function embedProtocol(browser, deck, version, problems) {
     await page.evaluate((site) => {
       window.send({ type: "no-such-command" });
       document.getElementById("viewer").contentWindow.postMessage({ slides: 2, type: "goto", id: "cover" }, site);
-    }, site.url);
+    }, siteUrl);
     await quiet("an unknown command and another contract major");
     await page.evaluate((id) => window.attack({ type: "goto", id }), order[0]);
     await quiet("a goto from a frame of the host origin that is not the parent");
@@ -732,6 +809,7 @@ async function embedProtocol(browser, deck, version, problems) {
 
     await viewer.locator(".strip-item button").nth(1).click();
     await waitMessage("a click on the strip", isSlide(1));
+    await page.keyboard.press("ArrowRight"); // the slide's one build step
     await page.keyboard.press("ArrowRight");
     await waitMessage("→ in the viewer frame", isSlide(2));
     for (const key of ["o", "?"]) {
@@ -752,6 +830,7 @@ async function embedProtocol(browser, deck, version, problems) {
     await waitMessage(`scheme ${theme.scheme}`, (message) => message.type === "outline" && message.outline.theme.scheme === theme.scheme);
 
     await writeFile(missingFile, missingText);
+    site.deploy();
     await waitMessage(`${missingId} published`, (message) => message.type === "outline" && message.outline.slides.every((slide) => !slide.missing), 20000);
 
     // Present: the host's fullscreen frame shows the stage alone and keeps keyboard navigation; leaving
@@ -779,6 +858,9 @@ async function embedProtocol(browser, deck, version, problems) {
     await sleep(300);
     const pages = await viewer.locator("#print-root .print-page").count();
     if (pages !== order.length) fail(`print built ${pages} pages for ${order.length} slides`);
+
+    await editProtocol({ page, viewer, site, dataDir, deck, waitMessage, fail });
+    await exportProtocol({ page, viewer, deck, waitMessage, fail });
 
     // The presenter window the host page opens follows the embedded viewer and leads it. A second viewer
     // of the deck would answer the presenter too.
@@ -809,6 +891,54 @@ async function embedProtocol(browser, deck, version, problems) {
   problems.push(...record.markers.map((line) => `host protocol: execution marker: ${line}`));
 }
 
+// Reads a .pptx in a page that has JSZip (the viewer's after an export): every XML part must parse,
+// no paragraph may carry two <a:pPr>, and each slide's notes are the text of its notes body.
+async function inspectPptx(page, bytes) {
+  return page.evaluate(async (base64) => {
+    const zip = await window.JSZip.loadAsync(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
+    const problems = [];
+    const docs = new Map();
+    for (const name of Object.keys(zip.files).filter((file) => /\.(xml|rels)$/.test(file))) {
+      const doc = new DOMParser().parseFromString(await zip.file(name).async("string"), "application/xml");
+      if (doc.getElementsByTagName("parsererror").length) problems.push(`${name} is not well-formed XML`);
+      docs.set(name, doc);
+    }
+    const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    const P = "http://schemas.openxmlformats.org/presentationml/2006/main";
+    const count = [...docs.keys()].filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).length;
+    const notes = [];
+    for (let i = 1; i <= count; i += 1) {
+      for (const p of docs.get(`ppt/slides/slide${i}.xml`).getElementsByTagNameNS(A, "p")) {
+        if ([...p.children].filter((child) => child.localName === "pPr").length > 1) problems.push(`slide ${i} has a paragraph with more than one a:pPr`);
+      }
+      const doc = docs.get(`ppt/notesSlides/notesSlide${i}.xml`);
+      const body = doc && [...doc.getElementsByTagNameNS(P, "sp")].find((sp) => sp.getElementsByTagNameNS(P, "ph")[0]?.getAttribute("type") === "body");
+      notes.push(body ? [...body.getElementsByTagNameNS(A, "p")].map((p) => [...p.getElementsByTagNameNS(A, "*")]
+        .filter((el) => el.localName === "t" || el.localName === "br").map((el) => (el.localName === "br" ? "\n" : el.textContent)).join("")).join("\n").trim() : "");
+    }
+    return { count, notes, problems };
+  }, Buffer.from(bytes).toString("base64"));
+}
+
+// The toolbar's PowerPoint export downloads a file with one slide and its notes per deck slide.
+async function exportCheck(context, site, deck, problems) {
+  const page = await openDeck(context, site, "", deck.order[0]);
+  const [download] = await Promise.all([page.waitForEvent("download", { timeout: 60000 }), page.click(".toolbar .export-btn")]);
+  const bytes = await readFile(await download.path());
+  const filename = `${deck.title}.pptx`;
+  if (download.suggestedFilename() !== filename) problems.push(`the export is named ${download.suggestedFilename()}, expected ${filename}`);
+  const pptx = await inspectPptx(page, bytes);
+  problems.push(...pptx.problems.map((line) => `export: ${line}`));
+  if (pptx.count !== deck.order.length) problems.push(`the export has ${pptx.count} slides, deck.json lists ${deck.order.length}`);
+  const notes = deck.expect.notes || {};
+  deck.order.forEach((id, index) => {
+    const want = notes[id] ?? "";
+    if (pptx.notes[index] !== undefined && pptx.notes[index] !== want) problems.push(`export notes for ${id}: ${JSON.stringify(pptx.notes[index])}, expected ${JSON.stringify(want)}`);
+  });
+  if (await page.locator(".update-banner").count()) problems.push(`the export shows ${JSON.stringify(await page.locator(".update-banner").textContent())}`);
+  await closePage(page);
+}
+
 // Serves one deck with the candidate package and checks everything but the visual diff.
 const stepsOf = (report) => report.slides.map((slide) => slide.steps || 0);
 
@@ -831,6 +961,7 @@ async function runCandidate(browser, deck, version, diff) {
     await interact(context, site, deck, steps, problems);
     if (deck.expect.navigate) await navigate(context, site, deck, steps, shots, diff, problems);
     if (deck.expect.activate) await activate(context, site, deck);
+    await exportCheck(context, site, deck, problems);
     if (deck.expect.embed) await embedProtocol(browser, deck, version, problems);
     if (existsSync(path.join(deck.dir, "type"))) problems.push(...await checkThemeFiles([path.join(deck.dir, "type"), CANDIDATE_DIR], `${deck.name}/type`));
     for (const page of context.pages()) await collectMarkers(page);

@@ -4,7 +4,7 @@ Site types for SecondStack Sites. A site type is a viewer that many sites share:
 
 | Folder | Type |
 |---|---|
-| [`slides/`](./slides) | Slides: a presentation deck, one HTML section per slide, in a 16:9 viewer with themes, overview, presenter view, fullscreen, print to PDF and an embed mode for host apps. |
+| [`slides/`](./slides) | Slides: a presentation deck, one HTML section per slide, in a 16:9 viewer with themes, overview, presenter view, fullscreen, print to PDF, PowerPoint export and an embed mode for host apps, with hand edits of slide text. |
 
 ## Layout
 
@@ -66,7 +66,10 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 | `ready` | `contract`, `siteType` (`name`, `version`), `outline`; sent again after the viewer reloads |
 | `outline` | `outline`: `title`, `theme` (`preset`, `scheme`), `slides` (`id`, `title`, `section` title or `null`, `missing`); after any change |
 | `slide` | `id`, `index` of the current slide |
-| `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid` |
+| `edited` | `id`, `path` (`project/slides/<id>.html`), `html`: the whole slide file after a hand edit, sanitized; the host saves it |
+| `exporting` | `done`, `total` slides while an export runs |
+| `exported` | `format` (`pptx`), `filename`, `bytes` (an `ArrayBuffer`, transferred), `warnings`: `[{ code, slides }]` for what did not map exactly |
+| `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid`, `export-busy`, `export-failed` |
 
 | Host → viewer | Fields |
 |---|---|
@@ -74,8 +77,14 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 | `present` | `on`: `true` shows the stage alone, with keyboard and click navigation and builds; `false` brings the strip back. The host makes the frame fullscreen itself in its click handler (`iframe.requestFullscreen()`, then `iframe.focus()` so the keys reach the deck), sends `on: true`, and sends `on: false` when `fullscreenchange` leaves fullscreen. |
 | `print` | The print dialog (save as PDF) |
 | `scheme` | `scheme`: `light` or `dark` |
+| `edit` | `on`: `true` makes the text blocks on the stage editable as plain text and shows every build step; `false` ends it. Each change is sent as `edited` after a pause or when the text loses focus. |
+| `export` | `format`: `pptx` |
 
 Unknown types and messages of another `slides` major are ignored. In embed mode the viewer's own keys for fullscreen, overview and help are off.
+
+A hand edit is written back into the slide file's own markup: only the edited text changes, and the file's style, notes, attributes and relative URLs stay. The viewer shows the edit at once and keeps it while refreshes still return an older version of the file; a version from another writer replaces it.
+
+The PowerPoint export (`export`, or the download button of the viewer's toolbar) keeps text, lists and tables editable and adds the notes. Fonts are referenced, not embedded, so a recipient without the deck fonts sees substitutes. Decorations that PowerPoint shapes cannot express become pictures, and builds and animations are not exported; `warnings` names the slides concerned (`rasterized-decoration`, `image-fit-baked`, `image-radius-dropped`, `radius-approximated`, `outline-dropped`, `app-without-poster`, `raster-failed`, `picture-failed`).
 
 The host opens the presenter window itself, in its click handler: `window.open("https://<site>/?presenter=1#<slide id>")`, without `noopener`. That window finds the embedded viewer through its opener's frames, and the two follow each other through window references, since storage partitioning keeps them on different `BroadcastChannel`s.
 
@@ -86,7 +95,8 @@ Every site follows its major, so a viewer change reaches every deck on that majo
 - check mode reports an error, or a warning that the deck's `check.json` does not expect, sanitizer removals included;
 - a sanitizer payload leaves an execution marker;
 - a slide's screenshot, on the stage or in print, light or dark, differs from the same deck rendered by the previous release (the highest `slides-v*` tag at or below the candidate version);
-- keyboard navigation, the overview, the presenter window's sync with the audience window, the host protocol, or the PDF page count goes wrong;
+- keyboard navigation, the overview, the presenter window's sync with the audience window, the host protocol, hand edits, or the PDF page count goes wrong;
+- the PowerPoint export of a deck has the wrong slide count or notes, or XML that PowerPoint would have to repair;
 - a theme in `slides.json` lacks its preview, stylesheet or font files, or its preview is not 16:9;
 - the package changed but `version` did not go up, or `TYPE_NAME` and `TYPE_VERSION` in `viewer.js` differ from `type.json`.
 

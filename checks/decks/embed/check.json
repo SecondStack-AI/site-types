@@ -1,3 +1,6 @@
 {
-  "embed": { "missing": "results" }
+  "embed": { "missing": "results", "edit": "agenda" },
+  "warnings": { "agenda": [{ "code": "unsafe-removed", "removed": ["onclick"] }] },
+  "notes": { "agenda": "Keep this short." },
+  "steps": { "agenda": 1 }
 }

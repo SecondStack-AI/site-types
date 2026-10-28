@@ -335,6 +335,8 @@ kbd {
   box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.35);
 }
 
+.banner-detail { display: block; margin-top: 2px; font-size: 12.5px; color: var(--s-muted); overflow-wrap: anywhere; }
+
 /* Empty and error states outside a deck */
 
 .notice { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; }

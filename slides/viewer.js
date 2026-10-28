@@ -7,7 +7,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.2.0"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.3.0"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 // The major of slides.json and of the host protocol; a host supports exactly one.
 const CONTRACT = 1;
@@ -44,6 +44,7 @@ const STRINGS = {
     smaller: "Smaller notes", larger: "Larger notes", blackout: "Black screen", goTo: "Go to slide number",
     firstLast: "First or last slide", stepOf: "Step {n} of {total}",
     updated: "This presentation was updated. Reload the page to see the new version.", reload: "Reload",
+    exportPptx: "Download as PowerPoint", exporting: "Exporting slide {n} of {total}…", exportFailed: "The PowerPoint file could not be created",
   },
   de: {
     slides: "Folien", previous: "Vorherige Folie", next: "Nächste Folie", overview: "Übersicht", close: "Schließen",
@@ -58,6 +59,7 @@ const STRINGS = {
     smaller: "Kleinere Notizen", larger: "Größere Notizen", blackout: "Schwarzer Bildschirm", goTo: "Zu Foliennummer springen",
     firstLast: "Erste oder letzte Folie", stepOf: "Schritt {n} von {total}",
     updated: "Diese Präsentation wurde aktualisiert. Laden Sie die Seite neu, um die neue Version zu sehen.", reload: "Neu laden",
+    exportPptx: "Als PowerPoint herunterladen", exporting: "Folie {n} von {total} wird exportiert…", exportFailed: "Die PowerPoint-Datei konnte nicht erstellt werden",
   },
   es: {
     slides: "Diapositivas", previous: "Diapositiva anterior", next: "Diapositiva siguiente", overview: "Vista general", close: "Cerrar",
@@ -72,6 +74,7 @@ const STRINGS = {
     smaller: "Notas más pequeñas", larger: "Notas más grandes", blackout: "Pantalla en negro", goTo: "Ir al número de diapositiva",
     firstLast: "Primera o última diapositiva", stepOf: "Paso {n} de {total}",
     updated: "Esta presentación se ha actualizado. Recarga la página para ver la nueva versión.", reload: "Recargar",
+    exportPptx: "Descargar como PowerPoint", exporting: "Exportando la diapositiva {n} de {total}…", exportFailed: "No se pudo crear el archivo de PowerPoint",
   },
   fr: {
     slides: "Diapositives", previous: "Diapositive précédente", next: "Diapositive suivante", overview: "Vue d’ensemble", close: "Fermer",
@@ -86,6 +89,7 @@ const STRINGS = {
     smaller: "Notes plus petites", larger: "Notes plus grandes", blackout: "Écran noir", goTo: "Aller au numéro de diapositive",
     firstLast: "Première ou dernière diapositive", stepOf: "Étape {n} sur {total}",
     updated: "Cette présentation a été mise à jour. Rechargez la page pour voir la nouvelle version.", reload: "Recharger",
+    exportPptx: "Télécharger au format PowerPoint", exporting: "Export de la diapositive {n} sur {total}…", exportFailed: "Le fichier PowerPoint n’a pas pu être créé",
   },
   pl: {
     slides: "Slajdy", previous: "Poprzedni slajd", next: "Następny slajd", overview: "Przegląd", close: "Zamknij",
@@ -100,6 +104,7 @@ const STRINGS = {
     smaller: "Mniejsze notatki", larger: "Większe notatki", blackout: "Czarny ekran", goTo: "Przejdź do slajdu o numerze",
     firstLast: "Pierwszy lub ostatni slajd", stepOf: "Krok {n} z {total}",
     updated: "Ta prezentacja została zaktualizowana. Odśwież stronę, aby zobaczyć nową wersję.", reload: "Odśwież",
+    exportPptx: "Pobierz jako PowerPoint", exporting: "Eksportowanie slajdu {n} z {total}…", exportFailed: "Nie udało się utworzyć pliku PowerPoint",
   },
   ru: {
     slides: "Слайды", previous: "Предыдущий слайд", next: "Следующий слайд", overview: "Обзор", close: "Закрыть",
@@ -114,6 +119,7 @@ const STRINGS = {
     smaller: "Уменьшить заметки", larger: "Увеличить заметки", blackout: "Чёрный экран", goTo: "Перейти к слайду по номеру",
     firstLast: "Первый или последний слайд", stepOf: "Шаг {n} из {total}",
     updated: "Эта презентация обновлена. Перезагрузите страницу, чтобы увидеть новую версию.", reload: "Перезагрузить",
+    exportPptx: "Скачать в формате PowerPoint", exporting: "Экспорт слайда {n} из {total}…", exportFailed: "Не удалось создать файл PowerPoint",
   },
 };
 
@@ -137,6 +143,7 @@ const ICONS = {
   shrink: '<path d="M8 3.5V6a2 2 0 0 1-2 2H3.5M20.5 8H18a2 2 0 0 1-2-2V3.5M3.5 16H6a2 2 0 0 1 2 2v2.5M16 20.5V18a2 2 0 0 1 2-2h2.5"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6"/><path d="M12 16.8v.1"/>',
   print: '<path d="M6.5 9V3.5h11V9"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6.5 14h11v6.5h-11z"/>',
+  download: '<path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5M4 16.5v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
   close: '<path d="M18 6L6 18M6 6l12 12"/>',
   pause: '<path d="M8.5 5v14M15.5 5v14"/>',
   play: '<path d="M7.5 5.5l11 6.5-11 6.5z"/>',
@@ -617,6 +624,10 @@ function sanitizeStylesheet(cssText, issues) {
   return sheet;
 }
 
+// While a hand edit is sanitized for its file, the hook only removes: it keeps the author's relative
+// URLs and adds no attributes that exist for rendering (iframe sandbox, link target).
+let sanitizingFile = false;
+
 function rewriteAttr(node, name, fn) {
   const attr = node.getAttributeNode(name);
   if (!attr) return;
@@ -624,7 +635,7 @@ function rewriteAttr(node, name, fn) {
   if (value === null) {
     node.removeAttributeNode(attr);
     hookRemovals.push(`${name}="${attr.value.slice(0, 60)}"`);
-  } else if (value !== attr.value) {
+  } else if (value !== attr.value && !sanitizingFile) {
     attr.value = value;
   }
 }
@@ -657,13 +668,15 @@ purify.addHook("afterSanitizeAttributes", (node) => {
   if (node.hasAttribute("style")) {
     const scratch = document.createElement("div");
     scratch.setAttribute("style", node.getAttribute("style"));
-    if (sanitizeDeclarations(scratch.style)) hookRemovals.push("style declaration with url() or escapes");
-    node.setAttribute("style", scratch.style.cssText);
+    const removed = sanitizeDeclarations(scratch.style);
+    if (removed) hookRemovals.push("style declaration with url() or escapes");
+    if (removed || !sanitizingFile) node.setAttribute("style", scratch.style.cssText);
   }
   if (node.localName === "iframe") {
-    node.setAttribute("sandbox", IFRAME_SANDBOX);
+    if (!sanitizingFile) node.setAttribute("sandbox", IFRAME_SANDBOX);
     rewriteAttr(node, "data-poster", (value) => resourceUrl(value, { dataImage: true }));
   }
+  if (sanitizingFile) return;
   if (isLink && /^https?:\/\//i.test(node.getAttribute("href") || "")) {
     node.setAttribute("target", "_blank");
     node.setAttribute("rel", "noopener noreferrer");
@@ -689,6 +702,7 @@ function sanitizeSection(section, issues) {
 }
 
 const STEP_RE = /^\s*[1-9]\d{0,2}\s*$/;
+const NODE_ATTR = "data-slides-node";
 
 // Builds: data-step="N" puts an element in step N, and elements with the same number are revealed
 // together. Numbers only order the steps, so data-step 2 and 5 are steps 1 and 2. An element whose
@@ -744,6 +758,9 @@ function parseSlide(id, text) {
   const strayText = [...body.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
   const headStyles = [...doc.head.querySelectorAll("style")].map((node) => node.textContent);
   let section = sections[0];
+  // Every element of the file's section is numbered in document order, so a hand edit on the stage can
+  // be written back into the file's own markup (editSlideFile).
+  section?.querySelectorAll("*").forEach((el, at) => el.setAttribute(NODE_ATTR, String(at)));
 
   if (!section) {
     issues.push(issue("error", "no-section", "The file must contain one <section> element"));
@@ -864,6 +881,12 @@ async function loadSlide(id, force) {
       error: result.error || "",
     });
     return true;
+  }
+  const edit = pendingEdits.get(id);
+  if (edit) {
+    if (result.text === edit.latest) pendingEdits.delete(id);
+    else if (result.text === edit.base || edit.posted.has(result.text)) return false;
+    else pendingEdits.delete(id);
   }
   if (current && current.text === result.text) return false;
   state.slides.set(id, { id, text: result.text, ...parseSlide(id, result.text) });
@@ -1282,7 +1305,8 @@ function go(index, { from = "local", step = 0 } = {}) {
   if (!total()) return;
   const next = Math.max(0, Math.min(total() - 1, index));
   const moved = next !== state.index;
-  const nextStep = Math.max(0, Math.min(stepCount(next), step));
+  if (moved && editing.on) flushEdit();
+  const nextStep = editing.on ? stepCount(next) : Math.max(0, Math.min(stepCount(next), step));
   const stepped = nextStep === state.step ? false : nextStep > state.step ? "forward" : "back";
   state.index = next;
   state.step = nextStep;
@@ -1300,7 +1324,7 @@ function goNext() {
 }
 
 function goPrevious() {
-  if (state.step > 0) go(state.index, { step: state.step - 1 });
+  if (state.step > 0 && !editing.on) go(state.index, { step: state.step - 1 });
   else if (state.index > 0) go(state.index - 1, { step: stepCount(state.index - 1) });
 }
 
@@ -1658,6 +1682,7 @@ function audienceView() {
     iconButton("grid", t("overview"), openOverview),
     iconButton("presenter", t("presenter"), openPresenter, "wide-only"),
     themeButton, fullButton,
+    iconButton("download", t("exportPptx"), downloadPptx, "wide-only export-btn"),
     iconButton("help", t("shortcuts"), openHelp, "wide-only"),
   );
   // Embedded, the host page draws the controls; the viewer keeps the stage and adds the strip.
@@ -1681,7 +1706,7 @@ function audienceView() {
   let suppressClick = false;
   slot.addEventListener("click", (event) => {
     if (suppressClick) { suppressClick = false; return; }
-    if (!total() || String(getSelection()) !== "") return;
+    if (!total() || editing.on || String(getSelection()) !== "") return;
     const interactive = event.composedPath().some((node) => node instanceof Element && node.matches("a, button, input, select, textarea, label, summary, details, video, audio, iframe, [contenteditable], [tabindex]"));
     if (interactive) return;
     const rect = slot.getBoundingClientRect();
@@ -1693,7 +1718,7 @@ function audienceView() {
     if (event.touches.length === 1) touch = { x: event.touches[0].clientX, y: event.touches[0].clientY };
   }, { passive: true });
   slot.addEventListener("touchend", (event) => {
-    if (!touch || event.changedTouches.length !== 1) return;
+    if (!touch || event.changedTouches.length !== 1 || editing.on) return;
     const dx = event.changedTouches[0].clientX - touch.x;
     const dy = event.changedTouches[0].clientY - touch.y;
     touch = null;
@@ -1740,7 +1765,10 @@ function audienceView() {
         strip.nav.hidden = false;
         if (moved) strip.mark(true);
       }
-      if (moved || full !== false) renderInto({ slot, host }, state.index, { step: state.step });
+      if (moved || full !== false) {
+        renderInto({ slot, host }, state.index, { step: state.step });
+        if (editing.on) makeEditable(host, state.index);
+      }
       else if (stepped) {
         // Screen readers do not announce content that becomes visible, so a step says what it revealed.
         const revealed = revealedText(showStep(host));
@@ -2131,6 +2159,196 @@ function onDataChanged({ deckChanged, orderChanged, changedSlides, shownId }) {
   }
 }
 
+// PowerPoint export. PptxGenJS (a classic script that also defines JSZip) and the exporter load on the
+// first export only. One export runs at a time; it reflects the slides as shown, local edits included.
+let pptxLibrary = null;
+let exportRunning = false;
+
+function loadPptxLibrary() {
+  pptxLibrary ||= new Promise((resolve, reject) => {
+    const script = h("script", { src: `${TYPE_ROOT}vendor/pptxgen.bundle.js` });
+    script.addEventListener("load", () => resolve({ PptxGenJS: window.PptxGenJS, JSZip: window.JSZip }), { once: true });
+    script.addEventListener("error", () => {
+      pptxLibrary = null;
+      reject(new Error("vendor/pptxgen.bundle.js could not be loaded"));
+    }, { once: true });
+    document.head.append(script);
+  });
+  return pptxLibrary;
+}
+
+async function exportPptx(onProgress) {
+  if (state.deckStatus !== "ok" || !total()) throw new Error("The presentation is not loaded");
+  if (exportRunning) throw Object.assign(new Error("An export is already running"), { code: "export-busy" });
+  exportRunning = true;
+  try {
+    const [{ PptxGenJS, JSZip }, { buildPptx }] = await Promise.all([loadPptxLibrary(), import(`${TYPE_ROOT}export-pptx.js`)]);
+    const { bytes, warnings } = await buildPptx({
+      PptxGenJS,
+      JSZip,
+      deck: { title: state.deck.title, lang: state.deck.lang, ids: [...state.deck.order] },
+      mountStill: (index, host) => {
+        mountFrame(host, buildFrame(index, { thumb: true }));
+        return { notes: state.slides.get(state.deck.order[index])?.notes || "" };
+      },
+      waitForMedia,
+      onProgress,
+    });
+    const base = (state.deck.title || t("slides")).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 120) || "slides";
+    return { format: "pptx", filename: `${base}.pptx`, bytes, warnings };
+  } finally {
+    exportRunning = false;
+  }
+}
+
+// The toolbar's export saves the file; a failure shows the error under the generic message.
+async function downloadPptx() {
+  const buttons = [...document.querySelectorAll(".export-btn")];
+  for (const button of buttons) button.disabled = true;
+  try {
+    const result = await exportPptx((n, count) => { live.textContent = t("exporting", { n, total: count }); });
+    const url = URL.createObjectURL(new Blob([result.bytes], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" }));
+    const link = h("a", { href: url, download: result.filename, hidden: true });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) {
+    showBanner(t("exportFailed"), String(error?.message || error));
+  } finally {
+    for (const button of buttons) button.disabled = false;
+  }
+}
+
+function showBanner(text, detail) {
+  document.querySelector(".update-banner")?.remove();
+  const banner = h("div", { class: "update-banner", role: "alert" },
+    h("span", null, text, detail ? h("small", { class: "banner-detail", text: detail }) : null),
+    iconButton("close", t("close"), () => banner.remove()),
+  );
+  document.body.append(banner);
+}
+
+// Edit mode (embed only): the text blocks on the stage become editable as plain text. Each change is
+// written back into the slide file's own markup, sanitized and sent to the host as `edited`, which
+// saves the file. The viewer shows the edit at once and keeps it while refreshes still return older
+// file versions; a version from another writer wins.
+const editing = { on: false, frame: null, text: "", id: null, timer: null };
+const pendingEdits = new Map(); // slide id -> { base, posted: Set, latest }
+const EDIT_SKIP = "svg, math, iframe, video, audio, canvas, img, picture, object, embed, aside, style, select, textarea, input, button";
+const EDIT_SHEET = new CSSStyleSheet();
+EDIT_SHEET.replaceSync(`[data-slides-edit] { cursor: text; outline: 3px dashed color-mix(in oklab, var(--accent) 45%, transparent); outline-offset: 10px; border-radius: 4px; }
+[data-slides-edit]:focus { outline: 3px solid var(--accent); }`);
+
+// Text blocks: the outermost elements with text whose content is inline only.
+function editableBlocks(section) {
+  const blocks = [];
+  const inlineOnly = (el) => [...el.children].every((child) => child.localName === "br"
+    || (!child.matches(EDIT_SKIP) && getComputedStyle(child).display.startsWith("inline") && inlineOnly(child)));
+  const walk = (el) => {
+    for (const child of el.children) {
+      if (child.matches(EDIT_SKIP) || !child.hasAttribute(NODE_ATTR)) continue;
+      if (/\S/.test(child.textContent) && inlineOnly(child)) blocks.push(child);
+      else walk(child);
+    }
+  };
+  walk(section);
+  return blocks;
+}
+
+function makeEditable(host, index) {
+  const id = state.deck.order[index];
+  const slide = state.slides.get(id);
+  const frame = host.shadowRoot?.querySelector(".frame");
+  editing.frame = null;
+  if (!frame || slide?.status !== "ok") return;
+  host.shadowRoot.adoptedStyleSheets = [...host.shadowRoot.adoptedStyleSheets, EDIT_SHEET];
+  for (const block of editableBlocks(frame.querySelector(":scope > section"))) {
+    block.setAttribute("contenteditable", "plaintext-only");
+    block.setAttribute("data-slides-edit", "");
+  }
+  // The file text this frame was built from: its node numbers index that text's elements.
+  Object.assign(editing, { frame, id, text: slide.text });
+  frame.addEventListener("input", () => {
+    clearTimeout(editing.timer);
+    editing.timer = setTimeout(flushEdit, 800);
+  });
+  frame.addEventListener("focusout", flushEdit);
+}
+
+function flushEdit() {
+  clearTimeout(editing.timer);
+  if (!editing.frame?.isConnected) return;
+  const { id } = editing;
+  const html = editSlideFile(editing.text, editing.frame);
+  const slide = state.slides.get(id);
+  if (!slide || html === slide.text) return;
+  const pending = pendingEdits.get(id) || { base: slide.text, posted: new Set(), latest: null };
+  pending.posted.add(html);
+  pending.latest = html;
+  pendingEdits.set(id, pending);
+  state.slides.set(id, { id, text: html, ...parseSlide(id, html) });
+  postToHost("edited", { id, path: `project/slides/${id}.html`, html });
+  view.dataChanged?.({ deckChanged: false, orderChanged: false, changedSlides: new Set([id]) });
+  reportOutline();
+}
+
+// The file's section with the text of every edited block taken from the stage. Elements inside a
+// block keep the file's own tag and attributes; markup the editor added is reduced to <br> and text.
+function editSlideFile(fileText, frame) {
+  const doc = new DOMParser().parseFromString(fileText, "text/html");
+  const section = [...doc.body.children].find((node) => node.localName === "section");
+  const sourceNodes = [...section.querySelectorAll("*")];
+  const restore = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return [doc.createTextNode(node.data)];
+    if (node.nodeType !== Node.ELEMENT_NODE) return [];
+    const source = sourceNodes[Number(node.getAttribute(NODE_ATTR))];
+    const children = [...node.childNodes].flatMap(restore);
+    if (!node.hasAttribute(NODE_ATTR) || !source) return node.localName === "br" ? [doc.createElement("br")] : children;
+    const copy = source.cloneNode(false);
+    copy.append(...children);
+    return [copy];
+  };
+  for (const block of frame.querySelectorAll("[data-slides-edit]")) {
+    sourceNodes[Number(block.getAttribute(NODE_ATTR))]?.replaceChildren(...[...block.childNodes].flatMap(restore));
+  }
+  return `${sanitizeSlideFile(section)}\n`;
+}
+
+// The same sanitizer as rendering, in file mode. Slide CSS keeps its text unless the CSS sanitizer
+// drops something; then the cleaned rules replace it.
+function sanitizeSlideFile(section) {
+  const styles = [...section.querySelectorAll("style")];
+  for (const style of styles) style.remove();
+  sanitizingFile = true;
+  let clean;
+  try {
+    clean = purify.sanitize(section, PURIFY_CONFIG).querySelector("section");
+  } finally {
+    sanitizingFile = false;
+  }
+  for (const style of styles.reverse()) {
+    const issues = [];
+    const sheet = sanitizeStylesheet(style.textContent, issues);
+    const css = issues.length ? [...sheet.cssRules].map((rule) => rule.cssText).join("\n") : style.textContent;
+    const element = clean.ownerDocument.createElement("style");
+    element.textContent = css;
+    clean.prepend(element);
+  }
+  return clean.outerHTML;
+}
+
+function setEditing(on) {
+  if (on === editing.on) return;
+  if (!on) flushEdit();
+  editing.on = on;
+  editing.frame = null;
+  // Every step is shown while editing, so every text can be reached.
+  if (on && state.deck) state.step = stepCount();
+  if (state.deck) syncHash();
+  view.render?.({ full: true });
+}
+
 // Embed mode's host protocol. The host frames /?embed=1&host=<its origin>#<slide id> and exchanges
 // {slides: CONTRACT, type, ...} messages with the viewer. The envelope owns `slides` and `type`, so `ready`
 // names the site type `siteType`, and `ready` and `outline` carry the outline as `outline`. Commands are taken only from the parent window
@@ -2138,8 +2356,8 @@ function onDataChanged({ deckChanged, orderChanged, changedSlides, shownId }) {
 // who may frame a private deck is Spot's frame-ancestors policy. Unknown types are ignored.
 const embedHost = { ready: false, outline: "", slide: "" };
 
-function postToHost(type, body) {
-  if (HOST_ORIGIN && window.parent !== window) window.parent.postMessage({ ...body, slides: CONTRACT, type }, HOST_ORIGIN);
+function postToHost(type, body, transfer = []) {
+  if (HOST_ORIGIN && window.parent !== window) window.parent.postMessage({ ...body, slides: CONTRACT, type }, { targetOrigin: HOST_ORIGIN, transfer });
 }
 
 function deckOutline() {
@@ -2198,6 +2416,20 @@ const HOST_COMMANDS = {
   },
   print() {
     window.print();
+  },
+  edit({ on }) {
+    if (typeof on !== "boolean") return hostError("command-invalid", 'edit needs "on": true or false');
+    setEditing(on);
+  },
+  // Progress goes out per slide; the bytes are transferred, not copied.
+  async export({ format }) {
+    if (format !== "pptx") return hostError("command-invalid", 'export needs "format": "pptx"');
+    try {
+      const result = await exportPptx((done, count) => postToHost("exporting", { done, total: count }));
+      postToHost("exported", result, [result.bytes]);
+    } catch (error) {
+      hostError(error?.code || "export-failed", String(error?.message || error));
+    }
   },
   scheme({ scheme }) {
     if (scheme !== "light" && scheme !== "dark") return hostError("command-invalid", 'scheme needs "light" or "dark"');
