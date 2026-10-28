@@ -1,6 +1,6 @@
 # Release check
 
-`run.mjs` checks the Slides package in `../slides` against the sample decks in `decks/`; see the root README for what it fails on and the release procedure. `serve.mjs` is the server it uses, and also previews a deck by hand: `node serve.mjs decks/layouts`, then open the printed URL. `preview.mjs` renders the preview image of every theme in `slides.json`.
+`run.mjs` checks the Slides package in `../slides` against the sample decks in `decks/`; see the root README for what it fails on and the release procedure. `serve.mjs` is the server it uses, and also previews a deck by hand: `node serve.mjs decks/layouts`, then open the printed URL. `preview.mjs` renders the preview image of every theme in `slides.json`. `node run.mjs --package <dir>` checks another Slides-family package, such as a fork, against these decks without a visual baseline; the host protocol check then expects that package's default theme.
 
 | Deck | Covers |
 |---|---|
@@ -24,6 +24,10 @@ Stage screenshots cover every step of a slide. The last state, with every step s
 The `embed` deck is also framed by `embed-host.html`, served from `localhost` so that it is another site than the deck on `127.0.0.1`, with one listed slide missing. The run checks `ready` and its outline (missing slide, sections, theme), `slide` after `goto`, a strip click and →, errors for an unknown slide and an invalid scheme, silence for unknown commands and another major, no effect for a command from a frame that is not the parent or for a viewer framed with another host origin (which also sends nothing), `outline` after `scheme` and after the missing slide is published, `present`: the host page makes the frame fullscreen from a click and the viewer shows the stage alone with → and ← working, and leaving fullscreen brings the strip back; `print`; and a presenter window opened by the host page that follows the viewer and leads it. `BroadcastChannel` is removed in that run, as storage partitioning separates an embedded viewer from its presenter window in browsers that partition, so the presenter sync goes through window references.
 
 A deck is a site directory: `project/` is what would be published, and `type/` holds files served under `/_type/` instead of the package's, as a fork would ship them. Requests to other hosts never leave the machine: Google Fonts URLs get the package's own fonts, other pages get a stub, and `probe.invalid` counts as an execution marker.
+
+## `accept.json`
+
+Entries are keyed by the candidate version and are needed only until that version is tagged: then the tag becomes the baseline, the entries never match again, and they are deleted. Pending now: `1.2.0` `presets/*`, because the `presets` deck uses `theme.preset`, which `slides-v1.1.0` ignores; delete it after `slides-v1.2.0` is tagged.
 
 ## `check.json`
 

@@ -41,7 +41,7 @@ Installing a type means trusting it. Its viewer runs with the visitor's authorit
 3. To run your fork beside the original, rename the type: change `name` in `type.json` and `TYPE_NAME` in `slides/viewer.js`.
 4. Install your folder URL in ControlTower, and press **Reload sources** after each release.
 
-To give a Slides fork its own themes, replace `slides.json` and add the theme assets; the viewer code stays as it is. Fonts go in the package with `faces[].unicodeRange` for subset files. A theme stylesheet sets the shape tokens `--heading-weight-shift`, `--heading-tracking`, `--radius-scale` and `--eyebrow-tracking` on `:root[data-preset="<id>"]`, and wraps slide rules in `:where([data-preset="<id>"])` so that a slide's own `<style>` still wins over them. `node checks/preview.mjs` renders every theme's preview image.
+To give a Slides fork its own themes, replace `slides.json` and add the theme assets; the viewer code stays as it is. Fonts go in the package with `faces[].unicodeRange` for subset files. A theme stylesheet sets the shape tokens `--heading-weight-shift`, `--heading-tracking`, `--radius-scale` and `--eyebrow-tracking` on `:root[data-preset="<id>"]`, and scopes slide rules to the slide frames with `:where(.frame[data-preset="<id>"])`: the stylesheet also applies to the viewer's own page, so a rule scoped to `[data-preset]` alone would also decorate the overview, dialogs and presenter view. The `:where()` keeps a slide's own `<style>` winning over theme rules. `node checks/preview.mjs` renders every theme's preview image.
 
 ## Compatibility rule
 

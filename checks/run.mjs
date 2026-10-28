@@ -12,7 +12,10 @@
 // bytes come with a higher version than the baseline tag and the --base ref, and every theme in
 // slides.json has its preview (16:9), stylesheet and font files.
 //
-//   node checks/run.mjs [--deck <name>]... [--baseline <git ref>|none] [--base <git ref>] [--save]
+//   node checks/run.mjs [--deck <name>]... [--baseline <git ref>|none] [--base <git ref>] [--package <dir>] [--save]
+//
+// --package checks another Slides-family package, such as a fork, against these decks. It has no
+// release history here, so there is no visual baseline unless --baseline names one.
 //
 // --save writes every candidate screenshot to checks/out/shots/. Failing screenshots always go to
 // checks/out/diff/<key>/ as baseline.png, candidate.png and diff.png.
@@ -29,8 +32,11 @@ import { serveSite } from "./serve.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
+// TYPE is the package folder and tag prefix in this repository; TYPE_NAME and CANDIDATE_DIR follow
+// --package when it is given.
 const TYPE = "slides";
-const CANDIDATE_DIR = path.join(ROOT, TYPE);
+let CANDIDATE_DIR = path.join(ROOT, TYPE);
+let TYPE_NAME = TYPE;
 const DECKS_DIR = path.join(HERE, "decks");
 const OUT_DIR = path.join(HERE, "out");
 const SCHEMES = ["light", "dark"];
@@ -50,12 +56,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 function parseArgs(argv) {
-  const opts = { decks: [], baseline: null, base: null, save: false };
+  const opts = { decks: [], baseline: null, base: null, package: null, save: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--deck") opts.decks.push(argv[++i]);
     else if (arg === "--baseline") opts.baseline = argv[++i];
     else if (arg === "--base") opts.base = argv[++i];
+    else if (arg === "--package") opts.package = argv[++i];
     else if (arg === "--save") opts.save = true;
     else throw new Error(`unknown argument ${arg}`);
   }
@@ -195,7 +202,7 @@ function compareIssues(file, issues, expected, expectedErrors, problems) {
 
 function compareReport(report, deck, version) {
   const problems = [];
-  if (report.type !== `${TYPE}@${version}`) problems.push(`check report type is ${report.type}, expected ${TYPE}@${version}`);
+  if (report.type !== `${TYPE_NAME}@${version}`) problems.push(`check report type is ${report.type}, expected ${TYPE_NAME}@${version}`);
   if (!report.complete) problems.push("check mode reports the deck as incomplete");
   if (report.slides.length !== deck.order.length) problems.push(`check mode reports ${report.slides.length} slides, deck.json lists ${deck.order.length}`);
   compareIssues("_type/slides.json", report.package?.issues || [], [], [], problems);
@@ -444,6 +451,14 @@ async function presenterSync(context, site, deck, problems) {
   await closePage(audience);
 }
 
+// The viewer chrome has no ::before or ::after content of its own, so any is a theme or slide rule that
+// escaped the slide frames.
+function chromePseudos(page) {
+  return page.evaluate(() => [...document.querySelectorAll("body *")].flatMap((el) => ["::before", "::after"]
+    .filter((pseudo) => !["none", "normal"].includes(getComputedStyle(el, pseudo).content))
+    .map((pseudo) => `${el.localName}${[...el.classList].map((name) => `.${name}`).join("")}${pseudo}`)));
+}
+
 // Keyboard on the audience view: → walks every step of the deck and the counter and hash follow; a
 // step announces what it revealed in the live region, and waiting steps are inert. O opens the overview
 // with every slide and the current one marked, and Escape closes it.
@@ -483,10 +498,18 @@ async function interact(context, site, deck, steps, problems) {
     const current = await overview.locator('.ov-item[aria-current="true"]').getAttribute("data-index").catch(() => null);
     if (items !== total) problems.push(`the overview lists ${items} slides, deck.json lists ${total}`);
     if (current !== String(total - 1)) problems.push(`the overview marks slide index ${current} as current, expected ${total - 1}`);
+    for (const item of await chromePseudos(page)) problems.push(`the overview shows a theme or slide decoration on ${item}`);
     await page.keyboard.press("Escape");
     if (!(await overview.waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false))) problems.push("Escape did not close the overview");
   } else {
     problems.push("O did not open the overview");
+  }
+  await page.keyboard.press("?");
+  if (await page.locator("dialog.help[open]").waitFor({ timeout: 5000 }).then(() => true, () => false)) {
+    for (const item of await chromePseudos(page)) problems.push(`the shortcuts dialog shows a theme or slide decoration on ${item}`);
+    await page.keyboard.press("Escape");
+  } else {
+    problems.push("? did not open the shortcuts dialog");
   }
   await closePage(page);
   // A malformed fragment, such as a copied link with a line break, still opens the deck on a fresh load.
@@ -613,6 +636,9 @@ async function checkThemeFiles(dirs, label) {
 async function embedProtocol(browser, deck, version, problems) {
   const fail = (text) => problems.push(`host protocol: ${text}`);
   const order = deck.order;
+  // The deck names no preset and no scheme: it shows the package's default theme in its scheme.
+  const themeList = JSON.parse(await readFile(path.join(CANDIDATE_DIR, "slides.json"), "utf8"));
+  const theme = themeList.themes.find((item) => item.id === themeList.defaultTheme);
   const missingId = deck.expect.embed.missing;
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "slides-embed-"));
   await cp(deck.dir, dataDir, { recursive: true });
@@ -661,9 +687,9 @@ async function embedProtocol(browser, deck, version, problems) {
     if (ready) {
       const { outline } = ready;
       if (ready.slides !== 1 || ready.contract !== 1) fail(`ready has slides ${ready.slides} and contract ${ready.contract}, expected 1 and 1`);
-      if (ready.siteType?.name !== TYPE || ready.siteType?.version !== version) fail(`ready names the site type ${JSON.stringify(ready.siteType)}`);
+      if (ready.siteType?.name !== TYPE_NAME || ready.siteType?.version !== version) fail(`ready names the site type ${JSON.stringify(ready.siteType)}`);
       if (outline.title !== deck.title) fail(`outline title is ${JSON.stringify(outline.title)}`);
-      if (outline.theme?.preset !== "default" || outline.theme?.scheme !== "light") fail(`outline theme is ${JSON.stringify(outline.theme)}`);
+      if (outline.theme?.preset !== theme.id || outline.theme?.scheme !== theme.scheme) fail(`outline theme is ${JSON.stringify(outline.theme)}, expected ${theme.id} in ${theme.scheme}`);
       if (outline.slides.map((slide) => slide.id).join() !== order.join()) fail(`outline lists ${outline.slides.map((slide) => slide.id)}`);
       for (const slide of outline.slides) {
         if (slide.missing !== (slide.id === missingId)) fail(`outline says ${slide.id} is ${slide.missing ? "" : "not "}missing`);
@@ -712,12 +738,18 @@ async function embedProtocol(browser, deck, version, problems) {
       await page.keyboard.press(key);
       if (await viewer.locator("dialog[open]").count()) fail(`${key} opened a dialog in embed mode`);
     }
+    // The host opens the presenter window, not the embedded viewer.
+    const pagesBefore = context.pages().length;
+    for (const key of ["s", "p"]) await page.keyboard.press(key);
+    await sleep(700);
+    if (context.pages().length !== pagesBefore) fail("S or P opened a presenter window from the embedded viewer");
 
-    await page.evaluate(() => window.send({ type: "scheme", scheme: "dark" }));
-    await waitMessage("scheme dark", (message) => message.type === "outline" && message.outline.theme.scheme === "dark");
-    if ((await viewer.evaluate(() => document.documentElement.dataset.scheme)) !== "dark") fail("scheme dark did not switch the viewer");
-    await page.evaluate(() => window.send({ type: "scheme", scheme: "light" }));
-    await waitMessage("scheme light", (message) => message.type === "outline" && message.outline.theme.scheme === "light");
+    const other = theme.scheme === "light" ? "dark" : "light";
+    await page.evaluate((scheme) => window.send({ type: "scheme", scheme }), other);
+    await waitMessage(`scheme ${other}`, (message) => message.type === "outline" && message.outline.theme.scheme === other);
+    if ((await viewer.evaluate(() => document.documentElement.dataset.scheme)) !== other) fail(`scheme ${other} did not switch the viewer`);
+    await page.evaluate((scheme) => window.send({ type: "scheme", scheme }), theme.scheme);
+    await waitMessage(`scheme ${theme.scheme}`, (message) => message.type === "outline" && message.outline.theme.scheme === theme.scheme);
 
     await writeFile(missingFile, missingText);
     await waitMessage(`${missingId} published`, (message) => message.type === "outline" && message.outline.slides.every((slide) => !slide.missing), 20000);
@@ -833,7 +865,13 @@ async function runBaseline(browser, deck, packageDir) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const failures = [];
+  if (opts.package) {
+    if (opts.base) throw new Error("--base compares with this repository's own package; it does not apply to --package");
+    CANDIDATE_DIR = path.resolve(opts.package);
+    opts.baseline ??= "none";
+  }
   const manifest = JSON.parse(await readFile(path.join(CANDIDATE_DIR, "type.json"), "utf8"));
+  TYPE_NAME = manifest.name;
   const candidate = parseVersion(manifest.version);
   if (!candidate) throw new Error(`type.json version ${manifest.version} is not SemVer`);
   const viewer = await readFile(path.join(CANDIDATE_DIR, "viewer.js"), "utf8");
@@ -841,7 +879,7 @@ async function main() {
   if (declared !== candidate.text) failures.push(`viewer.js TYPE_VERSION is ${JSON.stringify(declared)}, type.json version is ${candidate.text}: repin detection compares the two`);
   const declaredName = /const TYPE_NAME = "([^"]+)"/.exec(viewer)?.[1];
   if (declaredName !== manifest.name) failures.push(`viewer.js TYPE_NAME is ${JSON.stringify(declaredName)}, type.json name is ${manifest.name}: repin detection and the host protocol use it`);
-  failures.push(...await checkThemeFiles([CANDIDATE_DIR], TYPE));
+  failures.push(...await checkThemeFiles([CANDIDATE_DIR], TYPE_NAME));
 
   const baselineRef = opts.baseline === "none" ? null : opts.baseline ?? pickBaseline(candidate);
   if (opts.base) checkVersion(candidate, "base", opts.base, failures);
@@ -850,7 +888,7 @@ async function main() {
   const baselineVersion = baselineRef ? versionAt(baselineRef).text : null;
   const accepted = await loadAccepted(candidate.text);
   const decks = await loadDecks(opts.decks);
-  console.log(`candidate ${TYPE}@${candidate.text}, baseline ${baselineRef ? `${baselineRef} (${baselineVersion})` : "none: no visual diff"}, ${decks.length} decks`);
+  console.log(`candidate ${TYPE_NAME}@${candidate.text}, baseline ${baselineRef ? `${baselineRef} (${baselineVersion})` : "none: no visual diff"}, ${decks.length} decks`);
 
   await rm(OUT_DIR, { recursive: true, force: true });
   await mkdir(OUT_DIR, { recursive: true });

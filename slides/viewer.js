@@ -355,7 +355,7 @@ function fontFaceUrl(value) {
 function fontWeight(value, role, issues) {
   if (value == null) return "400";
   const weight = String(value).trim();
-  if (/^(normal|bold|[1-9]\d{0,2}( [1-9]\d{0,2})?)$/.test(weight)) return weight;
+  if (/^(normal|bold|(1000|[1-9]\d{0,2})( (1000|[1-9]\d{0,2}))?)$/.test(weight)) return weight;
   issues.push(issue("warning", "font-weight", `fonts.${role}.faces weight ${JSON.stringify(value)} is not a CSS weight such as 400 or "100 900"; 400 is used`));
   return "400";
 }
@@ -1354,7 +1354,7 @@ function onKeyDown(event) {
   } else if (key === "f" && !EMBED) {
     toggleFullscreen();
   } else if (key === "s" || key === "p") {
-    if (!PRESENTER) openPresenter();
+    if (!PRESENTER && !EMBED) openPresenter();
   } else if (key === "t") {
     toggleScheme();
   } else if (key === "b" || key === ".") {
