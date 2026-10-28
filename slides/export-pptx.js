@@ -3,7 +3,8 @@
 // laid-out DOM is walked into PptxGenJS objects: text blocks become native text boxes, plain boxes and
 // rules native shapes, tables native tables, images, SVG and app posters pictures. Decorations that
 // native shapes cannot express (gradients, masks, shadows) are rasterized through an SVG
-// foreignObject. Notes become slide notes. What does not map exactly is reported as a warning.
+// foreignObject. Opaque rasters are written as JPEG, the rest as PNG. App posters link to the app.
+// Notes become slide notes. What does not map exactly is reported as a warning.
 
 const PX_PER_IN = 144; // 1920 px = 13.333 in (LAYOUT_WIDE)
 const inch = (px) => Math.round((px / PX_PER_IN) * 10000) / 10000;
@@ -378,12 +379,12 @@ class SlideWriter {
     }
     // Large decorations are smooth gradients; 1x keeps the file small.
     const scale = box.w * box.h > 400000 ? 1 : 2;
-    const png = await rasterize(`<div xmlns="http://www.w3.org/1999/xhtml" style="position:absolute;left:${pad}px;top:${pad}px;width:${box.w}px;height:${box.h}px;${escapeAttr(css)}"></div>`, box.w + pad * 2, box.h + pad * 2, scale);
-    if (!png) {
+    const picture = await rasterize(`<div xmlns="http://www.w3.org/1999/xhtml" style="position:absolute;left:${pad}px;top:${pad}px;width:${box.w}px;height:${box.h}px;${escapeAttr(css)}"></div>`, box.w + pad * 2, box.h + pad * 2, scale);
+    if (!picture) {
       this.warn("raster-failed");
       return;
     }
-    put(() => this.real.addImage({ data: png, x: inch(box.x - pad), y: inch(box.y - pad), w: inch(box.w + pad * 2), h: inch(box.h + pad * 2), transparency: Math.round((1 - opacity) * 100) || undefined }));
+    put(() => this.real.addImage({ data: picture, x: inch(box.x - pad), y: inch(box.y - pad), w: inch(box.w + pad * 2), h: inch(box.h + pad * 2), transparency: Math.round((1 - opacity) * 100) || undefined }));
   }
 
   text(el, cs, opacity) {
@@ -549,6 +550,8 @@ class SlideWriter {
       if (opacity < 1) options.transparency = Math.round((1 - opacity) * 100);
       if (radius) options.rounding = false; // PptxGenJS can only round to a full ellipse; corners stay square.
       if (radius) this.warn("image-radius-dropped");
+      const app = name === "iframe" ? appLink(el) : null;
+      if (app) options.hyperlink = { url: app, tooltip: el.getAttribute("title") || app };
       put(() => this.real.addImage(options));
     })();
     this.pending.push(job);
@@ -582,7 +585,22 @@ async function fitImage(data, natural, box, fit) {
   const w = natural.w * scale;
   const h = natural.h * scale;
   canvas.getContext("2d").drawImage(img, (box.w - w) / 2, (box.h - h) / 2, w, h);
-  return canvas.toDataURL("image/png");
+  return canvasData(canvas);
+}
+
+// JPEG is several times smaller for photos and full-slide gradients; any transparent pixel keeps PNG.
+function canvasData(canvas) {
+  const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+  for (let i = 3; i < data.length; i += 4) if (data[i] !== 255) return canvas.toDataURL("image/png");
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+// The address of a still app frame, absolute, for http(s) apps only.
+function appLink(iframe) {
+  const src = iframe.getAttribute("data-app-src");
+  if (!src) return null;
+  const url = new URL(src, location.href);
+  return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
 }
 
 async function imageData(img) {
@@ -642,7 +660,7 @@ async function rasterize(html, w, h, scale = 2) {
     const ctx = canvas.getContext("2d");
     ctx.scale(scale, scale);
     ctx.drawImage(img, 0, 0);
-    return canvas.toDataURL("image/png");
+    return canvasData(canvas);
   } catch {
     return null; // reported by the caller as raster-failed
   }
@@ -694,8 +712,23 @@ export async function buildPptx({ PptxGenJS, JSZip, deck, mountStill, waitForMed
 // it writes startAt="1" on every numbered paragraph, which LibreOffice reads as a restart; and it writes
 // a <a:pPr> before every run with paragraph options, which is invalid OOXML (PowerPoint offers to
 // repair the file, LibreOffice drops the first bullet), so only the first one of a paragraph is kept.
+// It also writes a media file per use, so identical pictures (a title glow on every section slide)
+// are stored once and every slide points at the first copy.
 async function fixPptxXml(JSZip, bytes, bulletsBySlide) {
   const zip = await JSZip.loadAsync(bytes);
+  const firstCopy = new Map(); // content -> media name
+  const sameAs = new Map(); // duplicate media name -> first copy
+  for (const name of Object.keys(zip.files).filter((file) => /^ppt\/media\/[^/]+$/.test(file)).sort()) {
+    const content = await zip.file(name).async("base64");
+    if (firstCopy.has(content)) sameAs.set(name, firstCopy.get(content));
+    else firstCopy.set(content, name);
+  }
+  for (const name of sameAs.keys()) zip.remove(name);
+  for (const name of Object.keys(zip.files).filter((file) => /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(file))) {
+    const rels = await zip.file(name).async("string");
+    const fixed = rels.replace(/Target="\.\.\/(media\/[^"]+)"/g, (m, media) => (sameAs.has(`ppt/${media}`) ? `Target="../${sameAs.get(`ppt/${media}`).slice(4)}"` : m));
+    if (fixed !== rels) zip.file(name, fixed);
+  }
   for (let i = 0; i < bulletsBySlide.length; i += 1) {
     const file = zip.file(`ppt/slides/slide${i + 1}.xml`);
     if (!file) continue;

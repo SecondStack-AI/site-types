@@ -7,7 +7,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.3.0"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.4.0"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 // The major of slides.json and of the host protocol; a host supports exactly one.
 const CONTRACT = 1;
@@ -1205,8 +1205,10 @@ function buildFrame(index, { thumb = false, step = 0 } = {}) {
       media.muted = true;
       media.preload = "metadata";
     }
-    // Thumbnails, print and check keep the iframe and its sizing, but load nothing into it.
+    // Thumbnails, print and check keep the iframe and its sizing, but load nothing into it. The
+    // PowerPoint export links the app's poster to the address kept in data-app-src.
     for (const iframe of frame.querySelectorAll("iframe")) {
+      if (iframe.hasAttribute("src")) iframe.setAttribute("data-app-src", iframe.getAttribute("src"));
       iframe.removeAttribute("src");
       iframe.classList.add("embed-off");
       const poster = iframe.getAttribute("data-poster");

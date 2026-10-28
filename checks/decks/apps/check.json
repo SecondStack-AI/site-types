@@ -1,5 +1,19 @@
 {
   "notes": {
     "inline-app": "The app runs on the stage; stills show the poster."
+  },
+  "export": {
+    "jpeg": 3,
+    "links": {
+      "full-app": [
+        "/project/apps/chart.html"
+      ],
+      "inline-app": [
+        "/project/apps/chart.html"
+      ],
+      "external": [
+        "https://embed.example.com/board/42"
+      ]
+    }
   }
 }

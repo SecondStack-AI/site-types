@@ -987,7 +987,8 @@ async function embedProtocol(browser, deck, version, problems) {
 }
 
 // Reads a .pptx in a page that has JSZip (the viewer's after an export): every XML part must parse,
-// no paragraph may carry two <a:pPr>, and each slide's notes are the text of its notes body.
+// no paragraph may carry two <a:pPr>, and each slide's notes are the text of its notes body. It also
+// returns the media file names and each slide's external link targets.
 async function inspectPptx(page, bytes) {
   return page.evaluate(async (base64) => {
     const zip = await window.JSZip.loadAsync(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
@@ -1002,7 +1003,21 @@ async function inspectPptx(page, bytes) {
     const P = "http://schemas.openxmlformats.org/presentationml/2006/main";
     const count = [...docs.keys()].filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).length;
     const notes = [];
+    const links = [];
+    const media = Object.keys(zip.files).filter((name) => /^ppt\/media\/[^/]+$/.test(name));
+    const contents = new Map();
+    for (const name of media) {
+      const content = await zip.file(name).async("base64");
+      if (contents.has(content)) problems.push(`${name} has the same bytes as ${contents.get(content)}`);
+      else contents.set(content, name);
+    }
     for (let i = 1; i <= count; i += 1) {
+      const rels = docs.get(`ppt/slides/_rels/slide${i}.xml.rels`);
+      for (const rel of rels ? rels.getElementsByTagName("Relationship") : []) {
+        const target = rel.getAttribute("Target");
+        if (rel.getAttribute("TargetMode") !== "External" && target.startsWith("../") && !zip.file(`ppt/${target.slice(3)}`)) problems.push(`slide ${i} points at a missing ${target}`);
+      }
+      links.push(rels ? [...rels.getElementsByTagName("Relationship")].filter((rel) => rel.getAttribute("Type").endsWith("/hyperlink")).map((rel) => rel.getAttribute("Target")) : []);
       for (const p of docs.get(`ppt/slides/slide${i}.xml`).getElementsByTagNameNS(A, "p")) {
         if ([...p.children].filter((child) => child.localName === "pPr").length > 1) problems.push(`slide ${i} has a paragraph with more than one a:pPr`);
       }
@@ -1011,7 +1026,7 @@ async function inspectPptx(page, bytes) {
       notes.push(body ? [...body.getElementsByTagNameNS(A, "p")].map((p) => [...p.getElementsByTagNameNS(A, "*")]
         .filter((el) => el.localName === "t" || el.localName === "br").map((el) => (el.localName === "br" ? "\n" : el.textContent)).join("")).join("\n").trim() : "");
     }
-    return { count, notes, problems };
+    return { count, notes, links, media, problems };
   }, Buffer.from(bytes).toString("base64"));
 }
 
@@ -1030,6 +1045,17 @@ async function exportCheck(context, site, deck, problems) {
     const want = notes[id] ?? "";
     if (pptx.notes[index] !== undefined && pptx.notes[index] !== want) problems.push(`export notes for ${id}: ${JSON.stringify(pptx.notes[index])}, expected ${JSON.stringify(want)}`);
   });
+  // Opaque rasters are JPEG, and app posters link to their app; text links are listed too.
+  const expected = deck.expect.export;
+  if (expected) {
+    const jpegs = pptx.media.filter((name) => /\.jpe?g$/.test(name)).length;
+    if (expected.jpeg !== jpegs) problems.push(`the export has ${jpegs} JPEG pictures, expected ${expected.jpeg}: ${pptx.media.join(", ")}`);
+    deck.order.forEach((id, index) => {
+      const want = expected.links[id] || [];
+      const got = (pptx.links[index] || []).map((url) => url.replace(site.url, ""));
+      if (JSON.stringify(got) !== JSON.stringify(want)) problems.push(`export links for ${id}: ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+    });
+  }
   if (await page.locator(".update-banner").count()) problems.push(`the export shows ${JSON.stringify(await page.locator(".update-banner").textContent())}`);
   await closePage(page);
 }

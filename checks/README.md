@@ -17,7 +17,7 @@
 | `embed` | the host protocol, below |
 | `sanitizer` | payloads that must stay inert: script, `on*` (including handlers that fire without a click: `onerror` on a failing image, animation and transition events, `ontoggle`, `autofocus` with `onfocus`), `javascript:` and `data:` URLs (links and frames), `srcdoc`, forms, object/embed, SVG animation, base/meta/link, CSS `@import`, `url()` and escapes, mutation XSS |
 
-Besides check mode and the screenshots, every deck is exported to PowerPoint with the toolbar button: the file must have one slide per deck slide, the notes of `check.json`, well-formed XML and no paragraph with two `a:pPr`. Every deck is also driven once: → through the audience view, every step included, with the counter checked, O for the overview and Escape to close it, a step announcing what it revealed and waiting steps inert, and a link whose fragment ends in a line break still opening the deck; the presenter window follows the audience window and the audience follows the presenter back, with the notes read on the way; and each scheme's PDF is printed and its pages counted.
+Besides check mode and the screenshots, every deck is exported to PowerPoint with the toolbar button: the file must have one slide per deck slide, the notes of `check.json`, well-formed XML, no paragraph with two `a:pPr`, no picture stored twice and no relationship to a missing part. A deck whose `check.json` has `export` also fixes the number of JPEG pictures (opaque rasters) and each slide's external links, text links and app poster links alike. Every deck is also driven once: → through the audience view, every step included, with the counter checked, O for the overview and Escape to close it, a step announcing what it revealed and waiting steps inert, and a link whose fragment ends in a line break still opening the deck; the presenter window follows the audience window and the audience follows the presenter back, with the notes read on the way; and each scheme's PDF is printed and its pages counted.
 
 Stage screenshots cover every step of a slide. The last state, with every step shown, has the key `<deck>/<slide>/stage/<scheme>`, which a viewer without builds also produces, so a revealed slide is compared with the previous release; earlier steps are compared once the baseline has builds too.
 
@@ -27,7 +27,7 @@ A deck is a site directory: `project/` is what would be published, and `type/` h
 
 ## `accept.json`
 
-Entries are keyed by the candidate version and are needed only until that version is tagged: then the tag becomes the baseline, the entries never match again, and they are deleted. Pending now: `1.2.0` and `1.3.0` `presets/*`, because the `presets` deck uses `theme.preset`, which `slides-v1.1.0` ignores and which is the baseline while 1.2.0 is untagged; delete both after `slides-v1.2.0` and `slides-v1.3.0` are tagged.
+Entries are keyed by the candidate version and are needed only until that version is tagged: then the tag becomes the baseline, the entries never match again, and they are deleted. Pending now: `1.2.0`, `1.3.0` and `1.4.0` `presets/*`, because the `presets` deck uses `theme.preset`, which `slides-v1.1.0` ignores and which is the baseline while 1.2.0 is untagged; delete them after `slides-v1.2.0`, `slides-v1.3.0` and `slides-v1.4.0` are tagged.
 
 ## `check.json`
 
@@ -49,7 +49,8 @@ Optional, beside `project/`. Without it a deck must produce no issues and no not
   "preset": "sample",
   "scheme": "dark",
   "deckErrors": ["unknown-preset"],
-  "embed": { "missing": "results" }
+  "embed": { "missing": "results" },
+  "export": { "jpeg": 2, "links": { "closing": ["mailto:slides@example.com"] } }
 }
 ```
 
@@ -62,6 +63,7 @@ Optional, beside `project/`. Without it a deck must produce no issues and no not
 - `activate` clicks, focuses and hovers every interactive element on the stage.
 - `preset` is the theme check mode must show the deck in; `scheme` is the scheme the deck opens in without `?theme` (default: `deck.json` `theme.scheme`, else `light`); `deckErrors` lists the deck-level error codes the deck must cause.
 - `embed` runs the host protocol check, with the `missing` slide removed until the run publishes it, and hand edits on the `edit` slide.
+- `export` fixes the PowerPoint export's number of JPEG pictures (`jpeg`) and each slide's external link targets (`links`, by slide id, site-relative for the deck's own pages); a slide not listed must have none.
 
 A payload marks execution by setting a `window` property that starts with `__exec`, or by requesting `/api/probe` or any `probe.invalid` URL.
 
