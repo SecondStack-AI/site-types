@@ -2148,6 +2148,16 @@ function onDataChanged({ deckChanged, orderChanged, changedSlides, shownId }) {
     runCheck();
     return;
   }
+  // Typing still waiting for its pause is settled before a remount, as go() does: a new version of the
+  // edited slide wins and discards it; any other change keeps it, sent first so the new stage shows it.
+  if (editing.on && editing.dirty) {
+    if (changedSlides.has(editing.id)) {
+      clearTimeout(editing.timer);
+      editing.dirty = false;
+    } else {
+      flushEdit();
+    }
+  }
   // The current slide is remounted only when it changed, so a running app keeps its state.
   const full = deckChanged || orderChanged || changedSlides.has(currentId());
   view.render?.({ full });

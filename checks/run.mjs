@@ -714,6 +714,29 @@ async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, no
   site.deploy();
   if (!(await stage.locator("h2[contenteditable]", { hasText: "Remote" }).waitFor({ timeout: 5000 }).then(() => true, () => false))) fail("a version from another writer did not replace the edit");
 
+  // A remount while typed text waits for the pause: a deck.json change keeps the typing (it is sent
+  // first and the new stage shows it), a new version of the same slide discards it.
+  const stageText = (text) => viewer.waitForFunction((want) => document.querySelector(".stage .slide-host").shadowRoot.querySelector("h2")?.textContent === want, text, { timeout: 5000 }).then(() => true, () => false);
+  const deckFile = path.join(dataDir, "project", "deck.json");
+  await heading.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("ZZZ");
+  await writeFile(deckFile, JSON.stringify({ ...JSON.parse(await readFile(deckFile, "utf8")), lang: "en" }, null, 2));
+  site.deploy();
+  const typed = await waitMessage("edited before a deck.json remount", (message) => message.type === "edited" && message.id === id);
+  if (typed && !typed.html.includes("<h2>RemoteZZZ</h2>")) fail(`edited before a deck.json remount carries ${JSON.stringify(typed.html)}`);
+  if (!(await stageText("RemoteZZZ"))) fail(`after a deck.json remount the stage shows ${JSON.stringify(await heading.textContent())}, not the typed RemoteZZZ`);
+  if (typed) await writeFile(file, typed.html);
+  site.deploy();
+  await sleep(800);
+  await heading.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("QQQ");
+  await writeFile(file, (await readFile(file, "utf8")).replace("<h2>RemoteZZZ</h2>", "<h2>Other</h2>"));
+  site.deploy();
+  if (!(await stageText("Other"))) fail(`a new version of the slide during typing shows ${JSON.stringify(await heading.textContent())}, not Other`);
+  await noMessage("a new version of the slide during typing", "edited");
+
   const styled = deck.expect.embed.headStyle;
   const headStyle = /<style>[\s\S]*?<\/style>/.exec(await readFile(path.join(dataDir, "project", "slides", `${styled}.html`), "utf8"))[0];
   await send({ type: "goto", id: styled });
