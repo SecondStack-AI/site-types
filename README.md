@@ -85,6 +85,7 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 | `replace` | `id`, `token`, `text`: replace the captured selection as plain text and send `edited` immediately; stale ranges fail with `selection-stale` |
 | `clear-selection` | Clear the selection and toolbar without exiting editing |
 | `export` | `format`: `pptx` |
+| `connect-sync` | One transferred `MessagePort` for audience/presenter synchronization, accepted from the configured host origin. The host connects the audience and a sandboxed `?presenter=1&host=<host origin>` frame in a popup whose `opener` is `null`. |
 
 Unknown types and messages of another `slides` major are ignored. In embed mode the viewer's own keys for fullscreen, overview and help are off.
 

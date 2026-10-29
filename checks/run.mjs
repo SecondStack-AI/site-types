@@ -1054,15 +1054,20 @@ async function embedProtocol(browser, deck, version, problems) {
     await waitMessage("goto before the presenter", isSlide(0));
     await page.evaluate((id) => window.send({ type: "goto", id }), order[3]);
     await waitMessage("goto the presenter's start", isSlide(3));
-    const [presenter] = await Promise.all([context.waitForEvent("page"), page.click("#open-presenter")]);
+    const [presenterPopup] = await Promise.all([context.waitForEvent("page"), page.click("#open-presenter")]);
+    if (!(await presenterPopup.evaluate(() => window.opener === null))) fail("the presenter popup retained its Chat opener");
+    await presenterPopup.waitForSelector("iframe");
+    const presenter = presenterPopup.frames().find((frame) => frame !== presenterPopup.mainFrame());
+    if (!presenter) throw new Error("Presenter frame missing");
     await presenter.waitForFunction(() => !document.getElementById("app").hasAttribute("aria-busy"));
     if (!(await textIs(presenter, ".pv-counter", `4 / ${order.length}`))) fail(`the presenter window shows ${await presenter.locator(".pv-counter").textContent()}, not the viewer's slide 4`);
     await page.evaluate((id) => window.send({ type: "goto", id }), order[2]);
     await waitMessage("goto with the presenter open", isSlide(2));
     if (!(await textIs(presenter, ".pv-counter", `3 / ${order.length}`))) fail("the presenter window did not follow the viewer to slide 3");
-    await presenter.keyboard.press("ArrowLeft");
+    await presenter.locator(".pv-nav button").first().focus();
+    await presenterPopup.keyboard.press("ArrowLeft");
     await waitMessage("← in the presenter window", isSlide(1));
-    await closePage(presenter);
+    await closePage(presenterPopup);
     for (const frame of page.frames()) {
       const keys = await frame.evaluate((prefix) => Object.keys(window).filter((key) => key.startsWith(prefix)), MARKER_PREFIX).catch(() => []);
       for (const key of keys) record.markers.push(`${key} set in ${frame.url()}`);

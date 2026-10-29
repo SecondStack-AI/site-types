@@ -7,7 +7,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.6.2"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.6.3"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 // The major of slides.json and of the host protocol; a host supports exactly one.
 const CONTRACT = 1;
@@ -195,7 +195,7 @@ const CHECK = params.get("check") === "1";
 const PRESENTER = params.get("presenter") === "1";
 const EMBED = params.get("embed") === "1" && !CHECK && !PRESENTER;
 const THUMBNAIL = params.get("thumb") === "1" && !CHECK && !PRESENTER;
-const HOST_ORIGIN = EMBED ? hostOrigin(params.get("host")) : null;
+const HOST_ORIGIN = EMBED || PRESENTER ? hostOrigin(params.get("host")) : null;
 const app = document.getElementById("app");
 
 // The host parameter must be exactly an http(s) origin: it is the only origin the viewer talks to.
@@ -1432,6 +1432,7 @@ const sync = (() => {
   const channel = "BroadcastChannel" in window ? new BroadcastChannel(`slides:${location.host}`) : null;
   const sender = Math.random().toString(36).slice(2);
   const peers = new Set();
+  let hostPort = null;
   const seen = new Set();
   let sent = 0;
   // Reading a window's location throws across origins, the only test of a WindowProxy's origin.
@@ -1456,6 +1457,7 @@ const sync = (() => {
     sent += 1;
     const data = { ...message, role, sender, seq: `${sender}.${sent}` };
     channel?.postMessage(data);
+    hostPort?.postMessage(data);
     for (const peer of targets()) peer.postMessage({ slidesSync: data }, location.origin);
   };
   const receive = (data, source) => {
@@ -1483,7 +1485,16 @@ const sync = (() => {
   window.addEventListener("message", (event) => {
     if (event.origin === location.origin && event.source && event.data?.slidesSync) receive(event.data.slidesSync, event.source);
   });
-  return { post, addPeer: (win) => peers.add(win) };
+  return {
+    post,
+    addPeer: (win) => peers.add(win),
+    connectHostPort(port) {
+      hostPort?.close();
+      hostPort = port;
+      port.onmessage = ({ data }) => receive(data);
+      if (PRESENTER) post({ kind: "hello" });
+    },
+  };
 })();
 
 let overviewDialog = null;
@@ -2580,9 +2591,14 @@ const HOST_COMMANDS = {
 
 if (HOST_ORIGIN) {
   window.addEventListener("message", (event) => {
-    if (event.source !== window.parent || event.origin !== HOST_ORIGIN) return;
+    if (!event.source || event.origin !== HOST_ORIGIN) return;
     const data = event.data;
-    if (!data || typeof data !== "object" || data.slides !== CONTRACT || !Object.hasOwn(HOST_COMMANDS, data.type)) return;
+    if (!data || typeof data !== "object" || data.slides !== CONTRACT) return;
+    if (data.type === "connect-sync" && event.ports.length === 1) {
+      sync.connectHostPort(event.ports[0]);
+      return;
+    }
+    if (event.source !== window.parent || !EMBED || !Object.hasOwn(HOST_COMMANDS, data.type)) return;
     HOST_COMMANDS[data.type](data);
   });
 }

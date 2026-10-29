@@ -51,7 +51,23 @@
       if (!document.fullscreenElement) send({ type: "present", on: false });
     });
     document.getElementById("open-presenter").addEventListener("click", () => {
-      window.hostPresenter = window.open(`${site}/?presenter=1#${id}`, "host-presenter", "popup,width=1000,height=600");
+      const popup = window.open("about:blank", "_blank", "popup,width=1000,height=600");
+      window.hostPresenter = popup;
+      if (!popup) throw new Error("Presenter popup blocked");
+      popup.opener = null;
+      popup.document.body.style.margin = "0";
+      const frame = popup.document.createElement("iframe");
+      frame.setAttribute("sandbox", viewer.getAttribute("sandbox"));
+      frame.style.cssText = "display:block;width:100vw;height:100vh;border:0";
+      frame.onload = () => {
+        const channel = new MessageChannel();
+        const command = { slides: 1, type: "connect-sync" };
+        viewer.contentWindow.postMessage(command, site, [channel.port1]);
+        frame.contentWindow.postMessage(command, site, [channel.port2]);
+        frame.focus();
+      };
+      frame.src = `${site}/?presenter=1&host=${encodeURIComponent(location.origin)}#${id}`;
+      popup.document.body.append(frame);
     });
     viewer.src = `${site}/?embed=1&host=${encodeURIComponent(location.origin)}#${id}`;
     wrong.src = `${site}/?embed=1&host=${encodeURIComponent("https://wrong.invalid")}#${id}`;

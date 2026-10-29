@@ -1,4 +1,4 @@
-# Slides 1.6.2
+# Slides 1.6.3
 
 A Slides site is a presentation. The viewer is part of the site type: it shows each slide in a 16:9 frame, with keyboard and touch navigation, an overview, a presenter window with notes and a timer, fullscreen, light and dark themes and print to PDF. You write only the deck data: one JSON file and one HTML fragment per slide. Do not write `index.html`, CSS files or JavaScript.
 
@@ -101,7 +101,7 @@ The type's themes are in `_type/slides.json` of its viewer files. Each has an `i
 
 ## Build a deck
 
-1. Call `site_types` with `name="slides"`. Use the exact `type` it reports, for example `slides@1.6.2`, in every call below.
+1. Call `site_types` with `name="slides"`. Use the exact `type` it reports, for example `slides@1.6.3`, in every call below.
 2. Call `import_site` with that `type` and a new directory, for example `/workspace/sites/<name>-preview/`, read `_type/slides.json` there and choose the theme (Themes).
 3. Plan the deck: the story, the sections and the slide ids, one idea per slide. Start with a `title` slide and end with a closing slide.
 4. Write `project/deck.json` with the complete `order` first, then the slide files one by one. The viewer shows a placeholder for each listed slide whose file does not exist yet and fills it when the file appears, so you can publish early and keep writing.
@@ -111,7 +111,7 @@ The type's themes are in `_type/slides.json` of its viewer files. Each has an `i
 
 The workspace cannot open the published site. Check the deck locally with the viewer package:
 
-1. Use the directory from Build step 2, or call `import_site` with `type="slides@1.6.2"` and a new directory, for example `/workspace/sites/<name>-preview/`. It contains `index.html` and `_type/`.
+1. Use the directory from Build step 2, or call `import_site` with `type="slides@1.6.3"` and a new directory, for example `/workspace/sites/<name>-preview/`. It contains `index.html` and `_type/`.
 2. Copy the deck data into it, replacing any earlier copy, so deleted files do not linger: `rm -rf /workspace/sites/<name>-preview/project && cp -r /workspace/sites/<name>/project /workspace/sites/<name>-preview/`. Repeat after each change. Never publish the preview directory.
 3. Serve it: `python3 -m http.server 8765 --bind 127.0.0.1 --directory /workspace/sites/<name>-preview` in the background.
 4. Open `http://127.0.0.1:8765/?check=1` in the workspace browser. Check mode lists every slide with its issues and outlines overflowing elements. When `document.documentElement.dataset.slidesCheck` is `"done"`, the full report is the JSON text of `#slides-check-report` and the `[slides-check]` console line. `ok` is `false` while any error remains. While slides are still missing, the browser console also shows 404 errors for their files; that is expected.
@@ -119,7 +119,7 @@ The workspace cannot open the published site. Check the deck locally with the vi
 
 ## Publish
 
-- Publish the data directory, `/workspace/sites/<name>/`, which holds `project/` and optionally `_spot.json`, with `publish_site(path=..., site=<name>, type="slides@1.6.2")`. It needs no `index.html`; never include the preview files. Leave `type_target` empty.
+- Publish the data directory, `/workspace/sites/<name>/`, which holds `project/` and optionally `_spot.json`, with `publish_site(path=..., site=<name>, type="slides@1.6.3")`. It needs no `index.html`; never include the preview files. Leave `type_target` empty.
 - Only files under `project/` and `_spot.json` belong in it. Publishing refuses other files and names the first offending path; every `.json` file must be valid JSON.
 - An edit of an existing deck starts with `import_site(site=<name>, path=<empty directory>)`, which reports the exact type to publish with. The owner can also change slide text by hand, and those edits are saved into the slide files, so never edit from an older copy. Edit, check and publish with that `type`. A pin mismatch error (409) means the site now pins another version: import it again and redo the edit there.
 - Give the user the link with one sentence on what the deck covers. The presenter view opens with `S`, the overview with `O`, fullscreen with `F`; browser print saves a PDF with one page per slide, and the toolbar's download button a PowerPoint file.
