@@ -7,7 +7,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.6.4"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.6.5"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 // The major of slides.json and of the host protocol; a host supports exactly one.
 const CONTRACT = 1;
@@ -2283,7 +2283,7 @@ function showBanner(text, detail) {
 // written back into the slide file's own markup, sanitized and sent to the host as `edited`, which
 // saves the file. The viewer shows the edit at once and keeps it while refreshes still return older
 // file versions; a version from another writer wins.
-const editing = { enabled: false, on: false, frame: null, text: "", id: null, timer: null, dirty: false, baseline: "" };
+const editing = { enabled: false, on: false, frame: null, text: "", baseHtml: "", id: null, timer: null, dirty: false, baseline: "" };
 let slideSelection = null;
 let selectionCounter = 0;
 const pendingEdits = new Map(); // slide id -> { base, posted: Set, latest, stale }
@@ -2398,7 +2398,7 @@ function makeEditable(host, index) {
   }
   // The file text this frame was built from (its node numbers index that text's elements), and the
   // file this frame gives before any typing: only a different result is a hand edit.
-  Object.assign(editing, { frame, id, text: slide.text });
+  Object.assign(editing, { frame, id, text: slide.text, baseHtml: slide.text });
   editing.baseline = editSlideFile(slide.text, frame);
   frame.addEventListener("input", () => {
     clearSlideSelection();
@@ -2415,18 +2415,19 @@ function flushEdit() {
   clearTimeout(editing.timer);
   if (!editing.frame?.isConnected || !editing.dirty) return;
   editing.dirty = false;
-  const { id } = editing;
+  const { id, baseHtml } = editing;
   const html = editSlideFile(editing.text, editing.frame);
   const slide = state.slides.get(id);
   if (!slide || html === editing.baseline) return;
   editing.baseline = html;
-  const pending = pendingEdits.get(id) || { base: slide.text, posted: new Set(), latest: null, stale: 0 };
+  editing.baseHtml = html;
+  const pending = pendingEdits.get(id) || { base: baseHtml, posted: new Set(), latest: null, stale: 0 };
   pending.posted.add(html);
   pending.latest = html;
   pending.stale = 0;
   pendingEdits.set(id, pending);
   state.slides.set(id, { id, text: html, ...parseSlide(id, html) });
-  postToHost("edited", { id, path: `project/slides/${id}.html`, html, baseHtml: slide.text });
+  postToHost("edited", { id, path: `project/slides/${id}.html`, html, baseHtml });
   view.dataChanged?.({ deckChanged: false, orderChanged: false, changedSlides: new Set([id]) });
   reportOutline();
 }
