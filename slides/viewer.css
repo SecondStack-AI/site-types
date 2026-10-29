@@ -193,6 +193,8 @@ button { font: inherit; color: inherit; }
 /* Embed mode: the stage and a slide strip; the host page draws everything else. Presenting shows the stage only. */
 
 .embed { --strip-width: 200px; }
+.embed.thumbnail .stage { left: 0; bottom: 0; }
+.thumbnail .toolbar, .thumbnail .progress { display: none; }
 .embed .stage { left: var(--strip-width); }
 .embed .progress { display: none; }
 .strip {

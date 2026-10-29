@@ -56,6 +56,7 @@ The Slides family is every type whose package has `slides.json` at its root; Spo
 - `contract`: `1`, the major of this file and of the host protocol.
 - `defaultTheme`: the theme of a deck without `theme.preset`, and of a deck whose preset is unknown (check mode reports `unknown-preset`).
 - `themes`: each with `id` (`[a-z0-9-]{1,32}`), `title`, `description`, `scheme` (`light` or `dark`, the default of a deck in this theme), `colors.light` and `colors.dark` with the seven `deck.json` color roles, optional `fonts` (the `deck.json` roles, `faces[].src` relative to the package root, optional `faces[].unicodeRange`), optional `stylesheet` and `preview` (a 16:9 PNG or SVG that hosts show as the swatch). Paths are relative to the package root.
+- Optional `starters`: a catalog JSON path with a `starters` array. Each example owns its `id`, `title`, `description`, brief `hint`, `coverTitle`, `coverLabel`, `directory` (`starters/<id>`), `showcase` slide index, plan `blocks` (`id`, `title`, `note`, `level`, sample HTML paths relative to the example directory) and `slides` (`id`, `title`, `previews` mapping each enabled theme to a package PNG). The directory contains a real `project/deck.json` and sample slide files. Hosts display the images; agents read the same catalog and samples to adapt the example into a deck. Run `node checks/preview-starters.mjs` after changing samples or themes.
 
 A deck picks a theme with `deck.json` `theme.preset`. The theme's colors and fonts apply first; `scheme`, colors and fonts in `deck.json` override them.
 
@@ -68,9 +69,11 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 | `slide` | `id`, `index` of the current slide |
 | `edited` | `id`, `path` (`project/slides/<id>.html`), `html`: the whole slide file after a hand edit, sanitized; the host saves it byte for byte |
 | `editable` | `id`, `count`: in edit mode, how many text blocks of the slide on the stage can be edited, `0` for a slide not written yet or malformed |
+| `editing` | `on`, `id` (or `null`), `count`: edit state after a host command, double-click, Escape, outside click or navigation |
+| `selection` | `id`, ephemeral `token`, `text`, `rect` (`left`, `top`, `width`, `height` in viewer viewport CSS pixels); `{selection:null}` clears it |
 | `exporting` | `done`, `total` slides while an export runs |
 | `exported` | `format` (`pptx`), `filename`, `bytes` (an `ArrayBuffer`, transferred), `warnings`: `[{ code, slides }]` for what did not map exactly |
-| `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid`, `export-busy`, `export-failed` |
+| `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid`, `selection-stale`, `export-busy`, `export-failed` |
 
 | Host → viewer | Fields |
 |---|---|
@@ -78,10 +81,16 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 | `present` | `on`: `true` shows the stage alone, with keyboard and click navigation and builds; `false` brings the strip back. The host makes the frame fullscreen itself in its click handler (`iframe.requestFullscreen()`, then `iframe.focus()` so the keys reach the deck), sends `on: true`, and sends `on: false` when `fullscreenchange` leaves fullscreen. |
 | `print` | The print dialog (save as PDF) |
 | `scheme` | `scheme`: `light` or `dark` |
-| `edit` | `on`: `true` makes the text blocks on the stage editable as plain text and shows every build step; `false` ends it. Each change is sent as `edited` after a pause or when the text loses focus. |
+| `edit` | `on`, optional `enabled`: `{on:false,enabled:true}` grants owner permission and arms double-click; `{on:false,enabled:false}` revokes it. `on:true` enters plain text editing and reveals builds; `on:false` flushes and exits. Legacy `on:true` without `enabled` remains an explicit grant. |
+| `replace` | `id`, `token`, `text`: replace the captured selection as plain text and send `edited` immediately; stale ranges fail with `selection-stale` |
+| `clear-selection` | Clear the selection and toolbar without exiting editing |
 | `export` | `format`: `pptx` |
 
 Unknown types and messages of another `slides` major are ignored. In embed mode the viewer's own keys for fullscreen, overview and help are off.
+
+`?thumb=1` renders only the full 16:9 stage, without chrome or slide strip. Combine it with embed and host parameters when a gallery also needs authenticated outline messages. A text selection that crosses editable blocks is trimmed to the first block before the viewer sends it to the host.
+
+Editing permission starts off. Hosts grant it only to deck owners; shared decks must never receive a grant. Double-click selects the clicked word and starts editing. Escape, a click outside editable text or changing slides flushes and exits. The parent must send `edit {on:false}` for clicks outside the viewer, excluding its selection toolbar. Toolbar focus retains the captured range. A token is valid only for the same current slide and unchanged block, nodes, boundaries and text; a DOM mutation within the selected block invalidates it. Selection rectangles already include the stage transform. Hosts map them through the outer iframe's position and scale.
 
 A hand edit is written back into the slide file's own markup: only the edited text changes, and the file's attributes, notes and relative URLs stay. `<style>` text is kept as written, and a `<style>` before the section moves into it, so the slide looks the same. Only typing sends `edited`: switching edit mode or moving between slides sends nothing, and neither does a text typed and then restored. The viewer shows the edit at once and keeps it while refreshes still return an older version of the file, for at most three such refreshes; a version from another writer replaces it at once. Typing that still waits for its pause when the deck changes is settled first: it is sent when the change is elsewhere, and dropped when another writer changed the same slide.
 

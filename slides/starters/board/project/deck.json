@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "title": "Q3 business review",
+  "order": [
+    "cover",
+    "results",
+    "customers",
+    "risks",
+    "next",
+    "closing"
+  ],
+  "sections": {
+    "results": {
+      "title": "Results",
+      "start": "results"
+    },
+    "customers": {
+      "title": "Customers",
+      "start": "customers"
+    },
+    "risks": {
+      "title": "Risks",
+      "start": "risks"
+    },
+    "next": {
+      "title": "Next quarter",
+      "start": "next"
+    }
+  },
+  "theme": {
+    "preset": "default"
+  }
+}

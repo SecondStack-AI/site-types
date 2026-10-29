@@ -1,0 +1,38 @@
+{
+  "v": 1,
+  "title": "One platform for every AI team",
+  "order": [
+    "cover",
+    "problem",
+    "product",
+    "proof",
+    "pricing",
+    "next-step",
+    "closing"
+  ],
+  "sections": {
+    "problem": {
+      "title": "Problem",
+      "start": "problem"
+    },
+    "product": {
+      "title": "What we do",
+      "start": "product"
+    },
+    "proof": {
+      "title": "Proof",
+      "start": "proof"
+    },
+    "pricing": {
+      "title": "Pricing",
+      "start": "pricing"
+    },
+    "next-step": {
+      "title": "Next step",
+      "start": "next-step"
+    }
+  },
+  "theme": {
+    "preset": "default"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "title": "Data platform, phase 1",
+  "order": [
+    "cover",
+    "goals",
+    "scope",
+    "team",
+    "ways",
+    "closing"
+  ],
+  "sections": {
+    "goals": {
+      "title": "Goals",
+      "start": "goals"
+    },
+    "scope": {
+      "title": "Scope",
+      "start": "scope"
+    },
+    "team": {
+      "title": "Team and roles",
+      "start": "team"
+    },
+    "ways": {
+      "title": "Ways of working",
+      "start": "ways"
+    }
+  },
+  "theme": {
+    "preset": "default"
+  }
+}

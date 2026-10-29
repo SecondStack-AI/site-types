@@ -29,5 +29,6 @@
       },
       "preview": "themes/default.png"
     }
-  ]
+  ],
+  "starters": "starters.json"
 }

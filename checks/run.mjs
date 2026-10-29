@@ -676,6 +676,8 @@ async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, no
   await send({ type: "goto", id });
   await waitMessage("goto back while editing", isSlide(id));
   await noMessage("moving between slides while editing", "edited");
+  await send({ type: "edit", on: true });
+  await waitMessage("editable after navigation", editableOn(id));
 
   const shown = await viewer.evaluate(() => {
     const root = document.querySelector(".stage .slide-host").shadowRoot;
@@ -741,6 +743,7 @@ async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, no
   const headStyle = /<style>[\s\S]*?<\/style>/.exec(await readFile(path.join(dataDir, "project", "slides", `${styled}.html`), "utf8"))[0];
   await send({ type: "goto", id: styled });
   await waitMessage("goto the slide with a head style", isSlide(styled));
+  await send({ type: "edit", on: true });
   await waitMessage("editable on the slide with a head style", editableOn(styled));
   const styledHeading = stage.locator("h2");
   const before = await styledHeading.textContent();
@@ -757,6 +760,94 @@ async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, no
 
   await send({ type: "edit", on: false });
   if (!(await viewer.waitForFunction(() => !document.querySelector(".stage .slide-host").shadowRoot.querySelector("[contenteditable]"), null, { timeout: 5000 }).then(() => true, () => false))) fail("edit off left text editable");
+}
+
+// Exercises the selection toolbar contract through the actual cross-origin host and scaled stage.
+async function selectionProtocol({ page, viewer, deck, waitMessage, noMessage, fail }) {
+  const id = deck.expect.embed.edit;
+  const send = (message) => page.evaluate((m) => window.send(m), message);
+  const stage = viewer.locator(".stage .slide-host");
+  const heading = stage.locator("h2");
+  const selected = () => waitMessage("selected word", (m) => m.type === "selection" && typeof m.token === "string");
+  const editState = (on) => waitMessage(`editing ${on}`, (m) => m.type === "editing" && m.on === on && m.id === id);
+  const doubleClickWord = () => heading.dblclick({ position: { x: 15, y: 20 } });
+  const selectHeading = async () => {
+    await doubleClickWord();
+    return selected();
+  };
+  await send({ type: "goto", id });
+  await waitMessage("selection slide", (m) => m.type === "slide" && m.id === id);
+  await send({ type: "edit", on: false, enabled: false });
+  await heading.dispatchEvent("dblclick");
+  if (await stage.locator("[contenteditable]").count()) fail("shared deck double-click enabled editing");
+  await send({ type: "edit", on: false, enabled: true });
+  if (await stage.locator("[contenteditable]").count()) fail("arming permission entered edit mode");
+  await doubleClickWord();
+  await editState(true);
+  const first = await selected();
+  if (!first?.text.trim()) fail("double-click did not select a word");
+  await send({ type: "clear-selection" });
+  await waitMessage("clear before cross-block selection", (m) => m.type === "selection" && m.selection === null);
+  await heading.evaluate((el) => {
+    el.focus();
+    const root = el.getRootNode();
+    const paragraph = [...root.querySelectorAll("[data-slides-edit]")].find((block) => block !== el);
+    const range = document.createRange();
+    range.setStart(el.firstChild, 0);
+    range.setEnd(paragraph.firstChild, 1);
+    const selection = root.getSelection ? root.getSelection() : window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+  const bounded = await selected();
+  if (bounded?.text !== await heading.textContent()) fail("cross-block selection was not trimmed to its first text block");
+  if (first && bounded) {
+    const rect = await heading.evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const r = range.getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    });
+    if (Object.keys(rect).some((key) => Math.abs(first.rect[key] - rect[key]) > 1) || first.rect.width <= 0) fail(`selection geometry differs from the transformed text: ${JSON.stringify({ selection: first.rect, rect })}`);
+    await page.locator("#present").focus(); // Parent toolbar focus must retain the saved range.
+    await send({ type: "replace", id, token: bounded.token, text: "<script>plain & safe</script>" });
+    const edited = await waitMessage("selection replacement", (m) => m.type === "edited" && m.id === id);
+    if (!edited?.html.includes("&lt;script&gt;plain &amp; safe&lt;/script&gt;")) fail(`replacement was not saved as plain text: ${edited?.html}`);
+    await send({ type: "replace", id, token: bounded.token, text: "duplicate" });
+    await waitMessage("reused token rejected", (m) => m.type === "error" && m.code === "selection-stale");
+  }
+  const stale = await selectHeading();
+  await heading.evaluate((el) => { const text = el.firstChild; const old = text.textContent; text.textContent = `${old}!`; text.textContent = old; });
+  await waitMessage("mutation cleared selection", (m) => m.type === "selection" && m.selection === null);
+  if (stale) await send({ type: "replace", id, token: stale.token, text: "stale" });
+  await waitMessage("restored mutation rejected", (m) => m.type === "error" && m.code === "selection-stale");
+  const cleared = await selectHeading();
+  await send({ type: "clear-selection" });
+  await waitMessage("explicit clear", (m) => m.type === "selection" && m.selection === null);
+  if (cleared) await send({ type: "replace", id, token: cleared.token, text: "cleared" });
+  await waitMessage("cleared token rejected", (m) => m.type === "error" && m.code === "selection-stale");
+  await heading.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" Escape flush");
+  await page.keyboard.press("Escape");
+  await waitMessage("Escape flush", (m) => m.type === "edited" && m.html.includes(" Escape flush"));
+  await editState(false);
+  await doubleClickWord();
+  await editState(true);
+  await selected();
+  await viewer.locator(".stage").click({ position: { x: 2, y: 2 } });
+  await editState(false);
+  await doubleClickWord();
+  await editState(true);
+  const navigated = await selected();
+  const neighbour = deck.order.at(-1);
+  await send({ type: "goto", id: neighbour });
+  await editState(false);
+  if (await stage.locator("[contenteditable]").count()) fail("navigation left editing enabled");
+  if (navigated) await send({ type: "replace", id, token: navigated.token, text: "wrong slide" });
+  await waitMessage("previous slide token rejected", (m) => m.type === "error" && m.code === "selection-stale");
+  await noMessage("stale replacements", "edited");
 }
 
 // Export: progress per slide, then the file, transferred, with its warnings.
@@ -953,6 +1044,7 @@ async function embedProtocol(browser, deck, version, problems) {
     if (pages !== order.length) fail(`print built ${pages} pages for ${order.length} slides`);
 
     await editProtocol({ page, viewer, site, dataDir, deck, waitMessage, noMessage, fail });
+    await selectionProtocol({ page, viewer, deck, waitMessage, noMessage, fail });
     await exportProtocol({ page, viewer, deck, waitMessage, fail });
 
     // The presenter window the host page opens follows the embedded viewer and leads it. A second viewer

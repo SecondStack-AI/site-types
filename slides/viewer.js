@@ -7,7 +7,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.4.0"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.6.1"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 // The major of slides.json and of the host protocol; a host supports exactly one.
 const CONTRACT = 1;
@@ -194,6 +194,7 @@ const params = new URLSearchParams(location.search);
 const CHECK = params.get("check") === "1";
 const PRESENTER = params.get("presenter") === "1";
 const EMBED = params.get("embed") === "1" && !CHECK && !PRESENTER;
+const THUMBNAIL = params.get("thumb") === "1" && !CHECK && !PRESENTER;
 const HOST_ORIGIN = EMBED ? hostOrigin(params.get("host")) : null;
 const app = document.getElementById("app");
 
@@ -1308,7 +1309,7 @@ function go(index, { from = "local", step = 0 } = {}) {
   if (!total()) return;
   const next = Math.max(0, Math.min(total() - 1, index));
   const moved = next !== state.index;
-  if (moved && editing.on) flushEdit();
+  if (moved && editing.on) setEditing(false);
   const nextStep = editing.on ? stepCount(next) : Math.max(0, Math.min(stepCount(next), step));
   const stepped = nextStep === state.step ? false : nextStep > state.step ? "forward" : "back";
   state.index = next;
@@ -1354,6 +1355,11 @@ let digitTimer = null;
 
 function onKeyDown(event) {
   if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === "Escape" && editing.on) {
+    event.preventDefault();
+    setEditing(false);
+    return;
+  }
   const target = event.composedPath()[0];
   if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
   if (document.querySelector("dialog[open]")) return;
@@ -1689,7 +1695,7 @@ function audienceView() {
     iconButton("help", t("shortcuts"), openHelp, "wide-only"),
   );
   // Embedded, the host page draws the controls; the viewer keeps the stage and adds the strip.
-  const strip = EMBED ? slideStrip() : null;
+  const strip = EMBED && !THUMBNAIL ? slideStrip() : null;
   let notice = null;
 
   const updateChrome = () => {
@@ -1710,11 +1716,29 @@ function audienceView() {
   slot.addEventListener("click", (event) => {
     if (suppressClick) { suppressClick = false; return; }
     if (!total() || editing.on || String(getSelection()) !== "") return;
+    if (editing.enabled && stageTextBlock(event, host)) return;
     const interactive = event.composedPath().some((node) => node instanceof Element && node.matches("a, button, input, select, textarea, label, summary, details, video, audio, iframe, [contenteditable], [tabindex]"));
     if (interactive) return;
     const rect = slot.getBoundingClientRect();
     if (event.clientX - rect.left < rect.width / 3) goPrevious();
     else goNext();
+  });
+  slot.addEventListener("dblclick", (event) => {
+    if (!editing.enabled || editing.on || app.classList.contains("presenting")) return;
+    const block = stageTextBlock(event, host);
+    if (!block) return;
+    const selection = stageSelection(host.shadowRoot);
+    const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    setEditing(true, host);
+    block.focus({ preventScroll: true });
+    if (range && block.contains(range.commonAncestorContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    reportSelection();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (editing.on && !event.composedPath().some((node) => node instanceof Element && node.hasAttribute("data-slides-edit"))) setEditing(false);
   });
   let touch = null;
   slot.addEventListener("touchstart", (event) => {
@@ -1743,7 +1767,8 @@ function audienceView() {
   wake();
 
   app.replaceChildren(slot, progress, h("div", { class: "blackout" }), strip ? strip.nav : toolbar, live);
-  app.classList.toggle("embed", EMBED);
+  app.classList.toggle("embed", EMBED || THUMBNAIL);
+  app.classList.toggle("thumbnail", THUMBNAIL);
   updateChrome();
 
   return {
@@ -1769,6 +1794,7 @@ function audienceView() {
         if (moved) strip.mark(true);
       }
       if (moved || full !== false) {
+        clearSlideSelection();
         renderInto({ slot, host }, state.index, { step: state.step });
         if (editing.on) makeEditable(host, state.index);
       }
@@ -2246,15 +2272,17 @@ function showBanner(text, detail) {
 // written back into the slide file's own markup, sanitized and sent to the host as `edited`, which
 // saves the file. The viewer shows the edit at once and keeps it while refreshes still return older
 // file versions; a version from another writer wins.
-const editing = { on: false, frame: null, text: "", id: null, timer: null, dirty: false, baseline: "" };
+const editing = { enabled: false, on: false, frame: null, text: "", id: null, timer: null, dirty: false, baseline: "" };
+let slideSelection = null;
+let selectionCounter = 0;
 const pendingEdits = new Map(); // slide id -> { base, posted: Set, latest, stale }
 // A host that never saves an edit (a failed save, a lost message) must not pin it on the stage: after
 // this many refreshes that still return an older file, the file wins again.
 const PENDING_EDIT_REFRESHES = 3;
 const EDIT_SKIP = "svg, math, iframe, video, audio, canvas, img, picture, object, embed, aside, style, select, textarea, input, button";
 const EDIT_SHEET = new CSSStyleSheet();
-EDIT_SHEET.replaceSync(`[data-slides-edit] { cursor: text; outline: 3px dashed color-mix(in oklab, var(--accent) 45%, transparent); outline-offset: 10px; border-radius: 4px; }
-[data-slides-edit]:focus { outline: 3px solid var(--accent); }`);
+EDIT_SHEET.replaceSync(`[data-slides-edit] { cursor: text; outline: none; }
+[data-slides-edit]:hover { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 45%, transparent); border-radius: 6px; }`);
 
 // Text blocks: the outermost elements with text whose content is inline only.
 function editableBlocks(section) {
@@ -2268,9 +2296,76 @@ function editableBlocks(section) {
       else walk(child);
     }
   };
-  walk(section);
+  if (section) walk(section);
   return blocks;
 }
+
+function stageTextBlock(event, host) {
+  const blocks = editableBlocks(host.shadowRoot?.querySelector(".frame > section"));
+  return event.composedPath().find((node) => blocks.includes(node));
+}
+
+function stageSelection(root) {
+  return root?.getSelection?.() || window.getSelection();
+}
+
+function clearSlideSelection() {
+  if (!slideSelection) return;
+  slideSelection.observer.disconnect();
+  slideSelection = null;
+  postToHost("selection", { selection: null });
+}
+
+function reportSelection() {
+  if (!editing.on || !editing.frame?.isConnected) return;
+  // Parent toolbar focus may collapse the native selection; its captured range remains usable.
+  if (!document.hasFocus()) return;
+  const selection = stageSelection(editing.frame.getRootNode());
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const element = range?.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range?.startContainer.parentElement;
+  const block = element?.closest("[data-slides-edit]");
+  if (!range || !block || !editing.frame.contains(block)) return clearSlideSelection();
+  if (!block.contains(range.endContainer)) range.setEnd(block, block.childNodes.length);
+  const text = range.toString();
+  if (!text.trim()) return clearSlideSelection();
+  const previous = slideSelection;
+  if (previous && previous.range.startContainer === range.startContainer && previous.range.startOffset === range.startOffset
+    && previous.range.endContainer === range.endContainer && previous.range.endOffset === range.endOffset && previous.text === text) return;
+  clearSlideSelection();
+  const rect = range.getBoundingClientRect(); // Already includes the 1920×1080 stage's CSS transform.
+  const observer = new MutationObserver(clearSlideSelection);
+  observer.observe(block, { subtree: true, childList: true, characterData: true, attributes: true });
+  slideSelection = {
+    id: currentId(), token: String(++selectionCounter), range: range.cloneRange(), block, text,
+    markup: block.innerHTML, observer,
+    startNode: range.startContainer, startOffset: range.startOffset, endNode: range.endContainer, endOffset: range.endOffset,
+  };
+  postToHost("selection", { id: slideSelection.id, token: slideSelection.token, text,
+    rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } });
+}
+
+function replaceSlideSelection({ id, token, text }) {
+  if (typeof id !== "string" || typeof token !== "string" || typeof text !== "string") return hostError("command-invalid", 'replace needs "id", "token" and "text" strings');
+  const saved = slideSelection;
+  if (!editing.enabled || !editing.on || !saved || saved.id !== id || saved.token !== token || currentId() !== id
+    || !saved.block.isConnected || !editing.frame?.contains(saved.block) || saved.observer.takeRecords().length
+    || saved.block.innerHTML !== saved.markup || saved.range.toString() !== saved.text
+    || saved.range.startContainer !== saved.startNode || saved.range.startOffset !== saved.startOffset
+    || saved.range.endContainer !== saved.endNode || saved.range.endOffset !== saved.endOffset) {
+    clearSlideSelection();
+    return hostError("selection-stale", "Slide selection changed; select the text again before replacing it");
+  }
+  clearSlideSelection();
+  saved.range.deleteContents();
+  saved.range.insertNode(document.createTextNode(text));
+  stageSelection(editing.frame.getRootNode())?.removeAllRanges();
+  editing.dirty = true;
+  flushEdit();
+}
+
+document.addEventListener("selectionchange", reportSelection);
+window.addEventListener("resize", clearSlideSelection);
+document.addEventListener("scroll", clearSlideSelection, true);
 
 // Tells the host how many blocks of the slide on the stage can be edited (0 for a slide that is not
 // written yet or is malformed).
@@ -2280,7 +2375,10 @@ function makeEditable(host, index) {
   const frame = host.shadowRoot?.querySelector(".frame");
   clearTimeout(editing.timer);
   Object.assign(editing, { frame: null, dirty: false });
-  if (!frame || slide?.status !== "ok") return postToHost("editable", { id, count: 0 });
+  if (!frame || slide?.status !== "ok") {
+    postToHost("editable", { id, count: 0 });
+    return postToHost("editing", { on: true, id, count: 0 });
+  }
   host.shadowRoot.adoptedStyleSheets = [...host.shadowRoot.adoptedStyleSheets, EDIT_SHEET];
   const blocks = editableBlocks(frame.querySelector(":scope > section"));
   for (const block of blocks) {
@@ -2292,12 +2390,14 @@ function makeEditable(host, index) {
   Object.assign(editing, { frame, id, text: slide.text });
   editing.baseline = editSlideFile(slide.text, frame);
   frame.addEventListener("input", () => {
+    clearSlideSelection();
     editing.dirty = true;
     clearTimeout(editing.timer);
     editing.timer = setTimeout(flushEdit, 800);
   });
   frame.addEventListener("focusout", flushEdit);
   postToHost("editable", { id, count: blocks.length });
+  postToHost("editing", { on: true, id, count: blocks.length });
 }
 
 function flushEdit() {
@@ -2366,15 +2466,20 @@ function sanitizeSlideFile(section) {
   return clean.outerHTML;
 }
 
-function setEditing(on) {
+function setEditing(on, host = null) {
   if (on === editing.on) return;
+  clearSlideSelection();
   if (!on) flushEdit();
   editing.on = on;
   editing.frame = null;
   // Every step is shown while editing, so every text can be reached.
   if (on && state.deck) state.step = stepCount();
   if (state.deck) syncHash();
-  view.render?.({ full: true });
+  if (on && host) {
+    showStep(host);
+    makeEditable(host, state.index);
+  } else view.render?.({ full: true });
+  if (!on) postToHost("editing", { on: false, id: currentId(), count: 0 });
 }
 
 // Embed mode's host protocol. The host frames /?embed=1&host=<its origin>#<slide id> and exchanges
@@ -2445,9 +2550,17 @@ const HOST_COMMANDS = {
   print() {
     window.print();
   },
-  edit({ on }) {
+  edit({ on, enabled }) {
     if (typeof on !== "boolean") return hostError("command-invalid", 'edit needs "on": true or false');
-    setEditing(on);
+    if (enabled !== undefined && typeof enabled !== "boolean") return hostError("command-invalid", 'edit "enabled" must be true or false');
+    if (enabled !== undefined) editing.enabled = enabled;
+    else if (on) editing.enabled = true; // A legacy host's edit-on is an explicit permission grant.
+    setEditing(editing.enabled && on);
+  },
+  replace: replaceSlideSelection,
+  "clear-selection"() {
+    clearSlideSelection();
+    if (editing.frame) stageSelection(editing.frame.getRootNode())?.removeAllRanges();
   },
   // Progress goes out per slide; the bytes are transferred, not copied.
   async export({ format }) {

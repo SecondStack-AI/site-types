@@ -1,5 +1,7 @@
 # Release check
 
+`node checks/preview-starters.mjs [--package /absolute/package/path]`, from the repository root, renders every catalog slide in every enabled theme through that package's viewer. It writes the PNG assets and the catalog's theme-to-image mappings. Run it after editing samples, colors, fonts or theme styles, and review the images before packaging. Fork builds use this step to replace the upstream preview mappings with their own themes.
+
 `run.mjs` checks the Slides package in `../slides` against the sample decks in `decks/`; see the root README for what it fails on and the release procedure. `serve.mjs` is the server it uses, and also previews a deck by hand: `node serve.mjs decks/layouts`, then open the printed URL. `preview.mjs` renders the preview image of every theme in `slides.json`. `node run.mjs --package <dir>` checks another Slides-family package, such as a fork, against these decks without a visual baseline; the host protocol check then expects that package's default theme.
 
 | Deck | Covers |
@@ -25,9 +27,11 @@ The `embed` deck is also framed by `embed-host.html`, served from `127.0.0.1` wh
 
 A deck is a site directory: `project/` is what would be published, and `type/` holds files served under `/_type/` instead of the package's, as a fork would ship them. Requests to other hosts never leave the machine: Google Fonts URLs get the package's own fonts, other pages get a stub, and `probe.invalid` counts as an execution marker.
 
+The selection toolbar protocol is checked on the same embedded deck: owner permission arms double-click without entering editing, word selection reports the scaled text rectangle, parent toolbar focus keeps its range, replacement saves plain text, and reused, cleared, mutated-and-restored or previous-slide tokens fail. Escape flushes pending typing, outside clicks and navigation exit editing, and a shared deck receives no edit permission.
+
 ## `accept.json`
 
-Entries are keyed by the candidate version and are needed only until that version is tagged: then the tag becomes the baseline, the entries never match again, and they are deleted. Pending now: `1.2.0`, `1.3.0` and `1.4.0` `presets/*`, because the `presets` deck uses `theme.preset`, which `slides-v1.1.0` ignores and which is the baseline while 1.2.0 is untagged; delete them after `slides-v1.2.0`, `slides-v1.3.0` and `slides-v1.4.0` are tagged.
+Entries are keyed by the candidate version and are needed only until that version is tagged: then the tag becomes the baseline, the entries never match again, and they are deleted. Pending now: `1.2.0`, `1.3.0` and `1.5.0` `presets/*`, because the `presets` deck uses `theme.preset`, which the baseline `slides-v1.1.0` ignores. Delete them after the corresponding releases are tagged.
 
 ## `check.json`
 
