@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "title": "Your first two weeks",
+  "order": [
+    "cover",
+    "welcome",
+    "first-weeks",
+    "tools",
+    "people",
+    "closing"
+  ],
+  "sections": {
+    "welcome": {
+      "title": "Who we are",
+      "start": "welcome"
+    },
+    "first-weeks": {
+      "title": "First two weeks",
+      "start": "first-weeks"
+    },
+    "tools": {
+      "title": "Tools",
+      "start": "tools"
+    },
+    "people": {
+      "title": "Who to ask",
+      "start": "people"
+    }
+  },
+  "theme": {
+    "preset": "default"
+  }
+}

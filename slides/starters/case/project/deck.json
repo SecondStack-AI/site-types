@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "title": "Contoso Insurance",
+  "order": [
+    "cover",
+    "client",
+    "challenge",
+    "solution",
+    "results",
+    "closing"
+  ],
+  "sections": {
+    "client": {
+      "title": "The client",
+      "start": "client"
+    },
+    "challenge": {
+      "title": "Challenge",
+      "start": "challenge"
+    },
+    "solution": {
+      "title": "Solution",
+      "start": "solution"
+    },
+    "results": {
+      "title": "Results",
+      "start": "results"
+    }
+  },
+  "theme": {
+    "preset": "default"
+  }
+}

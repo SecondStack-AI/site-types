@@ -48,6 +48,11 @@
   --font-display: "Inter Variable", var(--font-fallback);
   --font-body: "Inter Variable", var(--font-fallback);
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Shape tokens that a theme stylesheet may set on :root[data-preset="<id>"]. */
+  --heading-weight-shift: 0;
+  --heading-tracking: 1;
+  --radius-scale: 1;
+  --eyebrow-tracking: 0.14em;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
 :root[data-scheme="light"] {
@@ -185,6 +190,47 @@ button { font: inherit; color: inherit; }
 .text-btn:hover { background: var(--s-surface); }
 .text-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
+/* Embed mode: the stage and a slide strip; the host page draws everything else. Presenting shows the stage only. */
+
+.embed { --strip-width: 200px; }
+.embed.thumbnail .stage { left: 0; bottom: 0; }
+.thumbnail .toolbar, .thumbnail .progress { display: none; }
+.embed .stage { left: var(--strip-width); }
+.embed .progress { display: none; }
+.strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--strip-width);
+  overflow-y: auto;
+  padding: 12px 12px 12px 6px;
+  background: var(--s-background);
+  border-right: 1px solid var(--s-border);
+}
+.strip ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.strip-section { margin: 8px 0 -2px 24px; font-size: 12px; font-weight: 600; color: var(--s-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip-item { display: flex; gap: 6px; align-items: flex-start; }
+.strip-num { flex: none; width: 18px; padding-top: 1px; text-align: right; font-size: 12px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+.strip-item button { flex: 1; min-width: 0; padding: 0; border: 0; background: none; cursor: pointer; }
+.strip-item button:focus-visible { outline: none; }
+.strip-item .slot { aspect-ratio: 16 / 9; border-radius: 6px; box-shadow: 0 0 0 1px var(--s-border); transition: box-shadow 150ms var(--ease); }
+.strip-item button:hover .slot { box-shadow: 0 0 0 1px var(--s-muted); }
+.strip-item button[aria-current="true"] .slot { box-shadow: 0 0 0 2px var(--s-accent); }
+.strip-item button:focus-visible .slot { box-shadow: 0 0 0 3px color-mix(in oklab, var(--s-accent) 60%, transparent); }
+.strip-item:has(button[aria-current="true"]) .strip-num { color: var(--s-accent); font-weight: 650; }
+.embed.presenting .stage { left: 0; bottom: 0; }
+.embed.presenting .progress { display: block; }
+.embed.presenting .strip { display: none; }
+
+@media (max-width: 640px) {
+  .embed .stage { left: 0; bottom: 96px; }
+  .strip { top: auto; right: 0; width: auto; height: 96px; padding: 10px 12px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-top: 1px solid var(--s-border); }
+  .strip ol { flex-direction: row; }
+  .strip-item { flex: none; width: 128px; }
+  .strip-section, .strip-num { display: none; }
+}
+
 /* Dialogs: overview and shortcuts */
 
 dialog {
@@ -290,6 +336,8 @@ kbd {
   border: 1px solid var(--s-border);
   box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.35);
 }
+
+.banner-detail { display: block; margin-top: 2px; font-size: 12.5px; color: var(--s-muted); overflow-wrap: anywhere; }
 
 /* Empty and error states outside a deck */
 

@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- The release check's host page for the Slides host protocol: served from another site than the deck, it
+     frames the viewer as Chat does and keeps every message its viewer frame sends. ?site=<deck origin>&id=<slide>. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Embed host</title>
+  <style>
+    body { margin: 0; font: 14px sans-serif; }
+    header { display: flex; gap: 8px; padding: 8px; }
+    iframe { display: block; width: 1200px; height: 600px; border: 0; }
+    #wrong { width: 320px; height: 180px; }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="present" type="button">Present</button>
+    <button id="open-presenter" type="button">Presenter view</button>
+  </header>
+  <iframe id="viewer" title="Deck" sandbox="allow-scripts allow-same-origin allow-popups allow-modals allow-downloads" allow="fullscreen"></iframe>
+  <iframe id="wrong" title="Deck framed with another host origin" sandbox="allow-scripts allow-same-origin allow-popups allow-modals allow-downloads"></iframe>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const site = params.get("site");
+    const id = params.get("id");
+    const viewer = document.getElementById("viewer");
+    const wrong = document.getElementById("wrong");
+    // received: what a host accepts (its viewer frame, the site origin). strays: every other message.
+    window.received = [];
+    window.strays = [];
+    addEventListener("message", (event) => {
+      const accepted = event.source === viewer.contentWindow && event.origin === site;
+      (accepted ? received : strays).push({ origin: event.origin, fromWrong: event.source === wrong.contentWindow, data: event.data });
+    });
+    window.send = (message) => viewer.contentWindow.postMessage({ slides: 1, ...message }, site);
+    window.sendWrong = (message) => wrong.contentWindow.postMessage({ slides: 1, ...message }, site);
+    // A frame of the host's own origin that is not the viewer's parent.
+    window.attack = (message) => {
+      const frame = document.createElement("iframe");
+      frame.srcdoc = `<script>parent.document.getElementById("viewer").contentWindow.postMessage(${JSON.stringify({ slides: 1, ...message })}, "*");<\/script>`;
+      document.body.append(frame);
+    };
+    // Present: the host makes the frame fullscreen, gives it the keyboard and tells the viewer; leaving
+    // fullscreen in any way ends presenting.
+    document.getElementById("present").addEventListener("click", async () => {
+      await viewer.requestFullscreen();
+      viewer.focus();
+      send({ type: "present", on: true });
+    });
+    document.addEventListener("fullscreenchange", () => {
+      if (!document.fullscreenElement) send({ type: "present", on: false });
+    });
+    document.getElementById("open-presenter").addEventListener("click", () => {
+      const popup = window.open("about:blank", "_blank", "popup,width=1000,height=600");
+      window.hostPresenter = popup;
+      if (!popup) throw new Error("Presenter popup blocked");
+      popup.opener = null;
+      popup.document.body.style.margin = "0";
+      const frame = popup.document.createElement("iframe");
+      frame.setAttribute("sandbox", viewer.getAttribute("sandbox"));
+      frame.setAttribute("allow", "fullscreen");
+      frame.style.cssText = "display:block;width:100vw;height:100vh;border:0";
+      frame.onload = () => {
+        const channel = new MessageChannel();
+        const command = { slides: 1, type: "connect-sync" };
+        viewer.contentWindow.postMessage(command, site, [channel.port1]);
+        frame.contentWindow.postMessage(command, site, [channel.port2]);
+        frame.focus();
+      };
+      frame.src = `${site}/?presenter=1&host=${encodeURIComponent(location.origin)}#${id}`;
+      popup.document.body.append(frame);
+    });
+    viewer.src = `${site}/?embed=1&host=${encodeURIComponent(location.origin)}#${id}`;
+    wrong.src = `${site}/?embed=1&host=${encodeURIComponent("https://wrong.invalid")}#${id}`;
+  </script>
+</body>
+</html>

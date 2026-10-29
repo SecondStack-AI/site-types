@@ -1,0 +1,577 @@
+{
+  "starters": [
+    {
+      "id": "board",
+      "title": "Board update",
+      "description": "Quarter results, customers, risks and the next quarter",
+      "hint": "For example: Q3 results for the board. Attach the finance export.",
+      "coverTitle": "Q3 business review",
+      "coverLabel": "Board update",
+      "directory": "starters/board",
+      "showcase": 1,
+      "blocks": [
+        {
+          "id": "results",
+          "title": "Results",
+          "note": "Revenue and margin against plan, from your numbers",
+          "level": 2,
+          "samples": [
+            "project/slides/results.html",
+            "project/slides/results-2.html"
+          ]
+        },
+        {
+          "id": "customers",
+          "title": "Customers",
+          "note": "New logos, churn and expansion",
+          "level": 1,
+          "samples": [
+            "project/slides/customers.html"
+          ]
+        },
+        {
+          "id": "risks",
+          "title": "Risks",
+          "note": "What could go wrong and how we hedge",
+          "level": 1,
+          "samples": [
+            "project/slides/risks.html"
+          ]
+        },
+        {
+          "id": "next",
+          "title": "Next quarter",
+          "note": "Targets and the decisions you need",
+          "level": 2,
+          "samples": [
+            "project/slides/next.html",
+            "project/slides/next-2.html"
+          ]
+        }
+      ],
+      "slides": [
+        {
+          "id": "cover",
+          "title": "Q3 business review",
+          "previews": {
+            "default": "starters/board/previews/default/cover.png"
+          }
+        },
+        {
+          "id": "results",
+          "title": "Results",
+          "previews": {
+            "default": "starters/board/previews/default/results.png"
+          }
+        },
+        {
+          "id": "customers",
+          "title": "Customers",
+          "previews": {
+            "default": "starters/board/previews/default/customers.png"
+          }
+        },
+        {
+          "id": "risks",
+          "title": "Risks",
+          "previews": {
+            "default": "starters/board/previews/default/risks.png"
+          }
+        },
+        {
+          "id": "next",
+          "title": "Next quarter",
+          "previews": {
+            "default": "starters/board/previews/default/next.png"
+          }
+        },
+        {
+          "id": "closing",
+          "title": "Questions",
+          "previews": {
+            "default": "starters/board/previews/default/closing.png"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pitch",
+      "title": "Sales pitch",
+      "description": "Problem, product, proof and the next step",
+      "hint": "For example: our platform for a bank’s data team. Add their RFP.",
+      "coverTitle": "One platform for every AI team",
+      "coverLabel": "For Northwind Bank",
+      "directory": "starters/pitch",
+      "showcase": 2,
+      "blocks": [
+        {
+          "id": "problem",
+          "title": "Problem",
+          "note": "The pain in the customer’s words",
+          "level": 1,
+          "samples": [
+            "project/slides/problem.html"
+          ]
+        },
+        {
+          "id": "product",
+          "title": "What we do",
+          "note": "The product in three parts",
+          "level": 2,
+          "samples": [
+            "project/slides/product.html",
+            "project/slides/product-2.html"
+          ]
+        },
+        {
+          "id": "proof",
+          "title": "Proof",
+          "note": "A customer like them, with numbers",
+          "level": 2,
+          "samples": [
+            "project/slides/proof.html",
+            "project/slides/proof-2.html"
+          ]
+        },
+        {
+          "id": "pricing",
+          "title": "Pricing",
+          "note": "Plans that fit their size",
+          "level": 1,
+          "samples": [
+            "project/slides/pricing.html"
+          ]
+        },
+        {
+          "id": "next-step",
+          "title": "Next step",
+          "note": "One clear ask",
+          "level": 1,
+          "samples": [
+            "project/slides/next-step.html"
+          ]
+        }
+      ],
+      "slides": [
+        {
+          "id": "cover",
+          "title": "One platform for every AI team",
+          "previews": {
+            "default": "starters/pitch/previews/default/cover.png"
+          }
+        },
+        {
+          "id": "problem",
+          "title": "Problem",
+          "previews": {
+            "default": "starters/pitch/previews/default/problem.png"
+          }
+        },
+        {
+          "id": "product",
+          "title": "What we do",
+          "previews": {
+            "default": "starters/pitch/previews/default/product.png"
+          }
+        },
+        {
+          "id": "proof",
+          "title": "Proof",
+          "previews": {
+            "default": "starters/pitch/previews/default/proof.png"
+          }
+        },
+        {
+          "id": "pricing",
+          "title": "Pricing",
+          "previews": {
+            "default": "starters/pitch/previews/default/pricing.png"
+          }
+        },
+        {
+          "id": "next-step",
+          "title": "Next step",
+          "previews": {
+            "default": "starters/pitch/previews/default/next-step.png"
+          }
+        },
+        {
+          "id": "closing",
+          "title": "Questions",
+          "previews": {
+            "default": "starters/pitch/previews/default/closing.png"
+          }
+        }
+      ]
+    },
+    {
+      "id": "case",
+      "title": "Customer case",
+      "description": "Client, challenge, solution and results",
+      "hint": "For example: how we moved Contoso to the new platform. Attach the project report.",
+      "coverTitle": "Contoso Insurance",
+      "coverLabel": "Customer case",
+      "directory": "starters/case",
+      "showcase": 4,
+      "blocks": [
+        {
+          "id": "client",
+          "title": "The client",
+          "note": "Who they are, in numbers",
+          "level": 1,
+          "samples": [
+            "project/slides/client.html"
+          ]
+        },
+        {
+          "id": "challenge",
+          "title": "Challenge",
+          "note": "What was not working",
+          "level": 1,
+          "samples": [
+            "project/slides/challenge.html"
+          ]
+        },
+        {
+          "id": "solution",
+          "title": "Solution",
+          "note": "What we did, step by step",
+          "level": 1,
+          "samples": [
+            "project/slides/solution.html"
+          ]
+        },
+        {
+          "id": "results",
+          "title": "Results",
+          "note": "Before and after",
+          "level": 2,
+          "samples": [
+            "project/slides/results.html",
+            "project/slides/results-2.html"
+          ]
+        }
+      ],
+      "slides": [
+        {
+          "id": "cover",
+          "title": "Contoso Insurance",
+          "previews": {
+            "default": "starters/case/previews/default/cover.png"
+          }
+        },
+        {
+          "id": "client",
+          "title": "The client",
+          "previews": {
+            "default": "starters/case/previews/default/client.png"
+          }
+        },
+        {
+          "id": "challenge",
+          "title": "Challenge",
+          "previews": {
+            "default": "starters/case/previews/default/challenge.png"
+          }
+        },
+        {
+          "id": "solution",
+          "title": "Solution",
+          "previews": {
+            "default": "starters/case/previews/default/solution.png"
+          }
+        },
+        {
+          "id": "results",
+          "title": "Results",
+          "previews": {
+            "default": "starters/case/previews/default/results.png"
+          }
+        },
+        {
+          "id": "closing",
+          "title": "Questions",
+          "previews": {
+            "default": "starters/case/previews/default/closing.png"
+          }
+        }
+      ]
+    },
+    {
+      "id": "migration",
+      "title": "Migration plan",
+      "description": "Scope, approach, timeline and risks",
+      "hint": "For example: moving 340 BI reports to the new platform. Attach the inventory.",
+      "coverTitle": "Move BI in weeks, not quarters",
+      "coverLabel": "Migration",
+      "directory": "starters/migration",
+      "showcase": 3,
+      "blocks": [
+        {
+          "id": "scope",
+          "title": "Scope",
+          "note": "What moves and what stays",
+          "level": 1,
+          "samples": [
+            "project/slides/scope.html"
+          ]
+        },
+        {
+          "id": "approach",
+          "title": "Approach",
+          "note": "How the work is done",
+          "level": 1,
+          "samples": [
+            "project/slides/approach.html"
+          ]
+        },
+        {
+          "id": "timeline",
+          "title": "Timeline",
+          "note": "Phases and milestones",
+          "level": 1,
+          "samples": [
+            "project/slides/timeline.html"
+          ]
+        },
+        {
+          "id": "risks",
+          "title": "Risks",
+          "note": "What could slow us down",
+          "level": 1,
+          "samples": [
+            "project/slides/risks.html"
+          ]
+        }
+      ],
+      "slides": [
+        {
+          "id": "cover",
+          "title": "Move BI in weeks, not quarters",
+          "previews": {
+            "default": "starters/migration/previews/default/cover.png"
+          }
+        },
+        {
+          "id": "scope",
+          "title": "Scope",
+          "previews": {
+            "default": "starters/migration/previews/default/scope.png"
+          }
+        },
+        {
+          "id": "approach",
+          "title": "Approach",
+          "previews": {
+            "default": "starters/migration/previews/default/approach.png"
+          }
+        },
+        {
+          "id": "timeline",
+          "title": "Timeline",
+          "previews": {
+            "default": "starters/migration/previews/default/timeline.png"
+          }
+        },
+        {
+          "id": "risks",
+          "title": "Risks",
+          "previews": {
+            "default": "starters/migration/previews/default/risks.png"
+          }
+        },
+        {
+          "id": "closing",
+          "title": "Questions",
+          "previews": {
+            "default": "starters/migration/previews/default/closing.png"
+          }
+        }
+      ]
+    },
+    {
+      "id": "kickoff",
+      "title": "Project kickoff",
+      "description": "Goals, scope, team and ways of working",
+      "hint": "For example: kickoff of the data platform project with the client team.",
+      "coverTitle": "Data platform, phase 1",
+      "coverLabel": "Kickoff",
+      "directory": "starters/kickoff",
+      "showcase": 3,
+      "blocks": [
+        {
+          "id": "goals",
+          "title": "Goals",
+          "note": "What success looks like",
+          "level": 1,
+          "samples": [
+            "project/slides/goals.html"
+          ]
+        },
+        {
+          "id": "scope",
+          "title": "Scope",
+          "note": "In and out",
+          "level": 1,
+          "samples": [
+            "project/slides/scope.html"
+          ]
+        },
+        {
+          "id": "team",
+          "title": "Team and roles",
+          "note": "Who does what",
+          "level": 1,
+          "samples": [
+            "project/slides/team.html"
+          ]
+        },
+        {
+          "id": "ways",
+          "title": "Ways of working",
+          "note": "Meetings, tools and decisions",
+          "level": 1,
+          "samples": [
+            "project/slides/ways.html"
+          ]
+        }
+      ],
+      "slides": [
+        {
+          "id": "cover",
+          "title": "Data platform, phase 1",
+          "previews": {
+            "default": "starters/kickoff/previews/default/cover.png"
+          }
+        },
+        {
+          "id": "goals",
+          "title": "Goals",
+          "previews": {
+            "default": "starters/kickoff/previews/default/goals.png"
+          }
+        },
+        {
+          "id": "scope",
+          "title": "Scope",
+          "previews": {
+            "default": "starters/kickoff/previews/default/scope.png"
+          }
+        },
+        {
+          "id": "team",
+          "title": "Team and roles",
+          "previews": {
+            "default": "starters/kickoff/previews/default/team.png"
+          }
+        },
+        {
+          "id": "ways",
+          "title": "Ways of working",
+          "previews": {
+            "default": "starters/kickoff/previews/default/ways.png"
+          }
+        },
+        {
+          "id": "closing",
+          "title": "Questions",
+          "previews": {
+            "default": "starters/kickoff/previews/default/closing.png"
+          }
+        }
+      ]
+    },
+    {
+      "id": "onboarding",
+      "title": "Team onboarding",
+      "description": "Welcome, first weeks, tools and people",
+      "hint": "For example: onboarding for new engineers. Add the handbook.",
+      "coverTitle": "Your first two weeks",
+      "coverLabel": "Welcome",
+      "directory": "starters/onboarding",
+      "showcase": 2,
+      "blocks": [
+        {
+          "id": "welcome",
+          "title": "Who we are",
+          "note": "The team and what it owns",
+          "level": 1,
+          "samples": [
+            "project/slides/welcome.html"
+          ]
+        },
+        {
+          "id": "first-weeks",
+          "title": "First two weeks",
+          "note": "What you do, day by day",
+          "level": 1,
+          "samples": [
+            "project/slides/first-weeks.html"
+          ]
+        },
+        {
+          "id": "tools",
+          "title": "Tools",
+          "note": "Where things live",
+          "level": 1,
+          "samples": [
+            "project/slides/tools.html"
+          ]
+        },
+        {
+          "id": "people",
+          "title": "Who to ask",
+          "note": "Names for each kind of question",
+          "level": 1,
+          "samples": [
+            "project/slides/people.html"
+          ]
+        }
+      ],
+      "slides": [
+        {
+          "id": "cover",
+          "title": "Your first two weeks",
+          "previews": {
+            "default": "starters/onboarding/previews/default/cover.png"
+          }
+        },
+        {
+          "id": "welcome",
+          "title": "Who we are",
+          "previews": {
+            "default": "starters/onboarding/previews/default/welcome.png"
+          }
+        },
+        {
+          "id": "first-weeks",
+          "title": "First two weeks",
+          "previews": {
+            "default": "starters/onboarding/previews/default/first-weeks.png"
+          }
+        },
+        {
+          "id": "tools",
+          "title": "Tools",
+          "previews": {
+            "default": "starters/onboarding/previews/default/tools.png"
+          }
+        },
+        {
+          "id": "people",
+          "title": "Who to ask",
+          "previews": {
+            "default": "starters/onboarding/previews/default/people.png"
+          }
+        },
+        {
+          "id": "closing",
+          "title": "Questions",
+          "previews": {
+            "default": "starters/onboarding/previews/default/closing.png"
+          }
+        }
+      ]
+    }
+  ]
+}

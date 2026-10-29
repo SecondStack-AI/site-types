@@ -1,6 +1,8 @@
 # Release check
 
-`run.mjs` checks the Slides package in `../slides` against the sample decks in `decks/`; see the root README for what it fails on and the release procedure. `serve.mjs` is the server it uses, and also previews a deck by hand: `node serve.mjs decks/layouts`, then open the printed URL.
+`node checks/preview-starters.mjs [--package /absolute/package/path]`, from the repository root, renders every catalog slide in every enabled theme through that package's viewer. It writes the PNG assets and the catalog's theme-to-image mappings. Run it after editing samples, colors, fonts or theme styles, and review the images before packaging. Fork builds use this step to replace the upstream preview mappings with their own themes.
+
+`run.mjs` checks the Slides package in `../slides` against the sample decks in `decks/`; see the root README for what it fails on and the release procedure. `serve.mjs` is the server it uses, and also previews a deck by hand: `node serve.mjs decks/layouts`, then open the printed URL. `preview.mjs` renders the preview image of every theme in `slides.json`. `node run.mjs --package <dir>` checks another Slides-family package, such as a fork, against these decks without a visual baseline; the host protocol check then expects that package's default theme.
 
 | Deck | Covers |
 |---|---|
@@ -12,13 +14,26 @@
 | `notes` | presenter notes |
 | `checkmode` | check mode's own detector: one slide that fits, one that overflows the safe area, one whose `section` clips |
 | `builds` | click-to-reveal steps: `data-step`, equal numbers together, SVG steps, an author's own effect, empty and invalid values, a `data-step` on the section (ignored), nested steps, and a `step` class from a deck's own markup that must stay a non-build (steps 0, stage identical to 1.0.0) |
+| `presets` | `theme.preset` with a fork-shaped `slides.json` in `type/`: theme colors under the deck's own light accent, a display font in two `unicodeRange` subsets, a stylesheet with shape tokens and scoped rules, a dark default scheme |
+| `preset-unknown` | a preset the package lacks: `unknown-preset`, and the default theme, identical to 1.1.0 |
+| `embed` | the host protocol, below |
 | `sanitizer` | payloads that must stay inert: script, `on*` (including handlers that fire without a click: `onerror` on a failing image, animation and transition events, `ontoggle`, `autofocus` with `onfocus`), `javascript:` and `data:` URLs (links and frames), `srcdoc`, forms, object/embed, SVG animation, base/meta/link, CSS `@import`, `url()` and escapes, mutation XSS |
 
-Besides check mode and the screenshots, every deck is driven once: → through the audience view, every step included, with the counter checked, O for the overview and Escape to close it, a step announcing what it revealed and waiting steps inert, and a link whose fragment ends in a line break still opening the deck; the presenter window follows the audience window and the audience follows the presenter back, with the notes read on the way; and each scheme's PDF is printed and its pages counted.
+Besides check mode and the screenshots, every deck is exported to PowerPoint with the toolbar button: the file must have one slide per deck slide, the notes of `check.json`, well-formed XML, no paragraph with two `a:pPr`, no picture stored twice and no relationship to a missing part. A deck whose `check.json` has `export` also fixes the number of JPEG pictures (opaque rasters) and each slide's external links, text links and app poster links alike. Every deck is also driven once: → through the audience view, every step included, with the counter checked, O for the overview and Escape to close it, a step announcing what it revealed and waiting steps inert, and a link whose fragment ends in a line break still opening the deck; the presenter window follows the audience window and the audience follows the presenter back, with the notes read on the way; and each scheme's PDF is printed and its pages counted.
 
 Stage screenshots cover every step of a slide. The last state, with every step shown, has the key `<deck>/<slide>/stage/<scheme>`, which a viewer without builds also produces, so a revealed slide is compared with the previous release; earlier steps are compared once the baseline has builds too.
 
-A deck is a site directory: `project/` is what would be published. Requests to other hosts never leave the machine: Google Fonts URLs get the package's own fonts, other pages get a stub, and `probe.invalid` counts as an execution marker.
+The `embed` deck is also framed by `embed-host.html`, served from `127.0.0.1` while the deck is on `deck.localhost`, another site, with one listed slide missing. On a host name the viewer subscribes to deploy events, and `serve.mjs` answers on `/api/ws`, so the run refreshes the viewer as Spot does after a publish. The run checks `ready` and its outline (missing slide, sections, theme), `slide` after `goto`, a strip click and →, errors for an unknown slide and an invalid scheme, silence for unknown commands and another major, no effect for a command from a frame that is not the parent or for a viewer framed with another host origin (which also sends nothing), `outline` after `scheme` and after the missing slide is published, `present`: the host page makes the frame fullscreen from a click and the viewer shows the stage alone with → and ← working, and leaving fullscreen brings the strip back; `print`; a presenter window opened by the host page that follows the viewer and leads it; `edit`: `editable` with a count (0 on the missing slide), nothing sent for edit mode on and off or for moving between slides while editing, a heading typed on the stage coming back as `edited` with the file's `<style>` text as written (an escape payload and a style the CSS sanitizer trims included), notes, build step and relative image URL kept and the `onclick` removed, a second edit changing only its own text, the outline taking the new title, the stage keeping the edit through a refresh that returns the old file and through the host's save, a version from another writer replacing it, typing that waits for its pause sent before a `deck.json` remount and dropped when the same slide changes, a head `<style>` moving into the section, and an unsaved edit giving way after three refreshes; and `export`: progress up to the last slide and a transferred file with its warnings (`image-unavailable` for a background image the browser cannot fetch), slides and notes. `BroadcastChannel` is removed in that run, as storage partitioning separates an embedded viewer from its presenter window in browsers that partition, so the host presenter sync uses the transferred message channel.
+
+The host presenter check opens a sandboxed frame in a popup with no opener and transfers a private message channel to both viewers. It checks synchronization in both directions with `BroadcastChannel` disabled.
+
+A deck is a site directory: `project/` is what would be published, and `type/` holds files served under `/_type/` instead of the package's, as a fork would ship them. Requests to other hosts never leave the machine: Google Fonts URLs get the package's own fonts, other pages get a stub, and `probe.invalid` counts as an execution marker.
+
+The selection toolbar protocol is checked on the same embedded deck: owner permission arms double-click without entering editing, word selection reports the scaled text rectangle, parent toolbar focus keeps its range, replacement saves plain text, and reused, cleared, mutated-and-restored or previous-slide tokens fail. Escape flushes pending typing, outside clicks and navigation exit editing, and a shared deck receives no edit permission.
+
+## `accept.json`
+
+Entries are keyed by the candidate version and are needed only until that version is tagged: then the tag becomes the baseline, the entries never match again, and they are deleted. Pending now: `1.2.0`, `1.3.0`, `1.5.0` and `1.6.2` `presets/*`, because the `presets` deck uses `theme.preset`, which the baseline `slides-v1.1.0` ignores. Delete them after the corresponding releases are tagged.
 
 ## `check.json`
 
@@ -36,7 +51,12 @@ Optional, beside `project/`. Without it a deck must produce no issues and no not
   "errors": { "resources": ["asset-missing"] },
   "notes": { "plain": "The exact text the presenter window shows." },
   "steps": { "list": 3 },
-  "navigate": true
+  "navigate": true,
+  "preset": "sample",
+  "scheme": "dark",
+  "deckErrors": ["unknown-preset"],
+  "embed": { "missing": "results" },
+  "export": { "jpeg": 2, "links": { "closing": ["mailto:slides@example.com"] } }
 }
 ```
 
@@ -47,9 +67,15 @@ Optional, beside `project/`. Without it a deck must produce no issues and no not
 - `announce` maps a step state (`list.1`) to the exact text the live region must announce after → reaches it.
 - `navigate` walks every step with → in the presenter window and back with ← in the audience window, checks that the other window follows and that the presenter shows "Step n of N", and checks that each step's deep link (`#id.2`) renders as the stage did when it walked there.
 - `activate` clicks, focuses and hovers every interactive element on the stage.
+- `preset` is the theme check mode must show the deck in; `scheme` is the scheme the deck opens in without `?theme` (default: `deck.json` `theme.scheme`, else `light`); `deckErrors` lists the deck-level error codes the deck must cause.
+- `embed` runs the host protocol check, with the `missing` slide removed until the run publishes it, and hand edits on the `edit` slide.
+- `export` fixes the PowerPoint export's number of JPEG pictures (`jpeg`) and each slide's external link targets (`links`, by slide id, site-relative for the deck's own pages); a slide not listed must have none.
+- `export.svg` checks attributes of exported SVG elements by id. Numeric opacity values allow one 8-bit alpha step for browser color quantization.
 
 A payload marks execution by setting a `window` property that starts with `__exec`, or by requesting `/api/probe` or any `probe.invalid` URL.
 
 ## Not covered
 
-Reload after a repin is not exercised. On `127.0.0.1` the viewer skips the deploy-event socket, `serve.mjs` has no `/api/ws`, and the served version never changes during a run, so `reloadIfRepinned` and its ETag parsing only ever see one version. Test a follow move against a real Spot when that code changes.
+Storage partitioning is off in Playwright's Chromium, so the run removes `BroadcastChannel` instead. Only Chromium runs the check.
+
+Reload after a repin is not exercised: the served version never changes during a run, so `reloadIfRepinned` and its ETag parsing only ever see one version. The PowerPoint files are read as XML, not opened in PowerPoint or LibreOffice. Test a follow move against a real Spot when that code changes.

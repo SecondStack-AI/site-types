@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "title": "Unknown preset",
+  "order": ["cover", "content"],
+  "theme": { "preset": "brand-x" }
+}

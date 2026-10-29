@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "title": "Move BI in weeks, not quarters",
+  "order": [
+    "cover",
+    "scope",
+    "approach",
+    "timeline",
+    "risks",
+    "closing"
+  ],
+  "sections": {
+    "scope": {
+      "title": "Scope",
+      "start": "scope"
+    },
+    "approach": {
+      "title": "Approach",
+      "start": "approach"
+    },
+    "timeline": {
+      "title": "Timeline",
+      "start": "timeline"
+    },
+    "risks": {
+      "title": "Risks",
+      "start": "risks"
+    }
+  },
+  "theme": {
+    "preset": "default"
+  }
+}

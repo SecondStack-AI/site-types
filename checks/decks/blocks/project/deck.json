@@ -5,6 +5,6 @@
   "order": [
     "headings", "inline", "lists", "check-plain", "quote-figure", "table", "code",
     "cols", "cols-wide-left", "cols-wide-right", "cards", "stats", "steps",
-    "callouts", "grow-bottom", "fill", "definitions", "svg-tokens"
+    "callouts", "grow-bottom", "fill", "definitions", "svg-tokens", "svg-alpha"
   ]
 }

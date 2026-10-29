@@ -2,6 +2,10 @@
 // site's origin"): the package's index.html at /, its other files under /_type/ with the strong ETag
 // "<version>-<sha256>" and `private, no-cache`, and every other path from the site's own data with
 // `no-store`. /api/probe records a hit and answers 204, so payload decks can report a request.
+// A site directory may hold `type/`, files served under /_type/ in place of the package's, as a fork
+// of the package would ship them (a deck's own slides.json and theme assets). /api/ws answers a
+// `_spot_deploys` subscription, and deploy() sends every subscriber a deploy event, as Spot does after
+// a publish; the viewer opens the socket only on a host name, such as deck.localhost.
 //
 //   node checks/serve.mjs <site-dir> [--package slides] [--port 8765]
 
@@ -79,7 +83,7 @@ export async function serveSite({ packageDir, dataDir, host = "127.0.0.1", port 
   };
 
   const serveTypeFile = async (req, res, rel) => {
-    const bytes = await readFileIfPresent(path.join(packageDir, rel));
+    const bytes = await readFileIfPresent(path.join(dataDir, "type", rel)) ?? await readFileIfPresent(path.join(packageDir, rel));
     if (!bytes) return send(req, res, 404, { "Content-Type": "text/plain" }, "404 page not found\n");
     if (!hashes.has(rel)) hashes.set(rel, createHash("sha256").update(bytes).digest("hex"));
     const etag = `"${version}-${hashes.get(rel)}"`;
@@ -106,7 +110,7 @@ export async function serveSite({ packageDir, dataDir, host = "127.0.0.1", port 
       }
       if (decoded.startsWith("/api/")) return send(req, res, 404, { "Content-Type": "text/plain" }, "404 page not found\n");
       const rel = decoded.slice(1) + (decoded.endsWith("/") ? "index.html" : "");
-      const bytes = await readFileIfPresent(path.join(dataDir, rel));
+      const bytes = rel.startsWith("type/") ? null : await readFileIfPresent(path.join(dataDir, rel));
       if (!bytes) return send(req, res, 404, { "Content-Type": "text/plain", "Cache-Control": "no-store" }, "404 page not found\n");
       return send(req, res, 200, {
         "Content-Type": CONTENT_TYPES[path.extname(rel).toLowerCase()] || "application/octet-stream",
@@ -116,12 +120,51 @@ export async function serveSite({ packageDir, dataDir, host = "127.0.0.1", port 
       send(req, res, 500, { "Content-Type": "text/plain" }, `${error?.message || error}\n`);
     }
   });
+  const sockets = new Set();
+  const sendFrame = (socket, data) => {
+    const body = Buffer.from(JSON.stringify(data));
+    const head = body.length < 126 ? Buffer.from([0x81, body.length]) : Buffer.from([0x81, 126, body.length >> 8, body.length & 0xff]);
+    socket.write(Buffer.concat([head, body]));
+  };
+  server.on("upgrade", (req, socket) => {
+    if (requestPath(req.url) !== "/api/ws" || !req.headers["sec-websocket-key"]) return socket.destroy();
+    const accept = createHash("sha1").update(`${req.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => sockets.delete(socket));
+    // Client frames are masked text frames under 64 KiB; a close frame ends the socket.
+    let buffer = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 6) {
+        let length = buffer[1] & 0x7f;
+        let at = 2;
+        if (length === 126) [length, at] = [buffer.readUInt16BE(2), 4];
+        if (length === 127 || buffer.length < at + 4 + length) return;
+        const mask = buffer.subarray(at, at + 4);
+        const payload = Buffer.from(buffer.subarray(at + 4, at + 4 + length)).map((byte, i) => byte ^ mask[i % 4]);
+        const opcode = buffer[0] & 0x0f;
+        buffer = buffer.subarray(at + 4 + length);
+        if (opcode === 0x8) return socket.end();
+        const message = opcode === 0x1 ? JSON.parse(Buffer.from(payload).toString("utf8")) : null;
+        if (message?.type === "subscribe") sendFrame(socket, { type: "subscribed", collection: message.collection });
+      }
+    });
+  });
   await new Promise((resolve) => server.listen(port, host, resolve));
   return {
     url: `http://${host}:${server.address().port}`,
+    port: server.address().port,
     version,
     probes,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    deploy: () => {
+      for (const socket of sockets) sendFrame(socket, { type: "deploy", collection: "_spot_deploys", site_type: `${manifest.name}@${version}` });
+    },
+    close: () => new Promise((resolve) => {
+      for (const socket of sockets) socket.destroy();
+      server.close(resolve);
+    }),
   };
 }
 

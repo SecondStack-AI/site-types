@@ -1,3 +1,15 @@
 {
-  "_comment": "Visual changes accepted for one candidate version: \"<version>\": { \"<deck>/<slide>/<stage|print>/<light|dark>\": \"reason\" }. * matches any text."
+  "_comment": "Visual changes accepted for one candidate version: \"<version>\": { \"<deck>/<slide>/<stage|print>/<light|dark>\": \"reason\" }. * matches any text.",
+  "1.2.0": {
+    "presets/*": "New in 1.2.0: theme.preset applies the deck overlay's sample theme, which 1.1.0 ignores."
+  },
+  "1.3.0": {
+    "presets/*": "New in 1.2.0, still untagged: theme.preset applies the deck overlay's sample theme, which 1.1.0 ignores."
+  },
+  "1.5.0": {
+    "presets/*": "New in 1.2.0, still untagged: theme.preset applies the deck overlay's sample theme, which 1.1.0 ignores."
+  },
+  "1.6.5": {
+    "presets/*": "New in 1.2.0, still untagged: theme.preset applies the deck overlay's sample theme, which 1.1.0 ignores."
+  }
 }

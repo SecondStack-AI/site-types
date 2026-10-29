@@ -1,0 +1,78 @@
+{
+  "contract": 1,
+  "defaultTheme": "plain",
+  "themes": [
+    {
+      "id": "plain",
+      "title": "Plain",
+      "description": "Blue on cool white or deep slate, Inter",
+      "scheme": "light",
+      "colors": {
+        "light": {
+          "background": "oklch(0.992 0.002 250)",
+          "surface": "oklch(0.962 0.005 255)",
+          "foreground": "oklch(0.2 0.012 258)",
+          "muted": "oklch(0.5 0.016 256)",
+          "accent": "oklch(0.56 0.135 238)",
+          "onAccent": "oklch(0.995 0 0)",
+          "border": "oklch(0.89 0.007 258)"
+        },
+        "dark": {
+          "background": "oklch(0.172 0.009 258)",
+          "surface": "oklch(0.222 0.012 257)",
+          "foreground": "oklch(0.966 0.004 248)",
+          "muted": "oklch(0.73 0.014 252)",
+          "accent": "oklch(0.775 0.135 230)",
+          "onAccent": "oklch(0.172 0.009 258)",
+          "border": "oklch(0.37 0.016 257)"
+        }
+      },
+      "preview": "sample/plain.svg"
+    },
+    {
+      "id": "sample",
+      "title": "Sample",
+      "description": "Amber on ink, monospaced headings",
+      "scheme": "dark",
+      "colors": {
+        "light": {
+          "background": "#FBFAF7",
+          "surface": "#FFFFFF",
+          "foreground": "#16181D",
+          "muted": "#5B6170",
+          "accent": "#C2410C",
+          "onAccent": "#FFFFFF",
+          "border": "#E4E1DA"
+        },
+        "dark": {
+          "background": "#14161B",
+          "surface": "#1E2129",
+          "foreground": "#F5F3EE",
+          "muted": "#A4A9B6",
+          "accent": "#F59E0B",
+          "onAccent": "#14161B",
+          "border": "#3A3F4B"
+        }
+      },
+      "fonts": {
+        "display": {
+          "family": "Sample Display",
+          "faces": [
+            {
+              "src": "fonts/jetbrains-mono-latin-wght-normal.woff2",
+              "weight": "100 1000",
+              "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+            },
+            {
+              "src": "fonts/jetbrains-mono-cyrillic-wght-normal.woff2",
+              "weight": "100 1000",
+              "unicodeRange": "U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116"
+            }
+          ]
+        }
+      },
+      "stylesheet": "sample/theme.css",
+      "preview": "sample/sample.svg"
+    }
+  ]
+}

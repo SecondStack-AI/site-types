@@ -1,0 +1,19 @@
+<section>
+  <h2>SVG paint transparency</h2>
+  <svg viewBox="0 0 1400 450" width="1400" height="450" role="img" aria-label="Translucent chart shapes">
+    <defs>
+      <linearGradient id="alpha-gradient">
+        <stop id="alpha-stop" offset="0" stop-color="rgba(255,0,0,0.5)" stop-opacity="0.4"/>
+        <stop id="transparent-stop" offset="1" stop-color="rgba(0,0,255,0)"/>
+      </linearGradient>
+    </defs>
+    <rect id="alpha-fill" x="40" y="40" width="300" height="300" fill="rgba(255,0,0,0.5)"/>
+    <rect id="alpha-stroke" x="180" y="100" width="300" height="300" fill="none" stroke="rgba(0,0,255,0.5)" stroke-opacity="0.4" stroke-width="30"/>
+    <rect id="gradient-fill" x="520" y="40" width="300" height="300" fill="url(#alpha-gradient)" fill-opacity="0.6"/>
+    <rect id="alpha-current" x="860" y="40" width="220" height="140" style="color:rgba(0,128,0,0.5)" fill="currentColor" fill-opacity="0.5"/>
+    <rect id="opaque-fill" x="860" y="210" width="220" height="140" fill="blue" fill-opacity="0.6"/>
+    <g id="alpha-group" opacity="0.5">
+      <rect id="group-fill" x="1120" y="40" width="220" height="300" fill="rgba(255,0,0,0.5)"/>
+    </g>
+  </svg>
+</section>

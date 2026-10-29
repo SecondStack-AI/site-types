@@ -1,0 +1,11 @@
+{
+  "export": {
+    "jpeg": 2,
+    "links": {
+      "theme-dark": ["https://example.com/"],
+      "theme-light": ["https://example.com/"],
+      "theme-accent": ["https://example.com/"],
+      "closing": ["mailto:slides@example.com"]
+    }
+  }
+}

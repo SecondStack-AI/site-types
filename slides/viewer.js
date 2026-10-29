@@ -1,12 +1,19 @@
 // Slides viewer for the `slides` site type. Reads /project/deck.json and /project/slides/<id>.html,
 // sanitizes each slide with an allowlist and renders it inline in its own shadow root, and keeps the
 // deck fresh through the _spot_deploys event or bounded polling while slides are still missing.
+// The package's /_type/slides.json lists the themes a deck picks with theme.preset; ?embed=1 shows
+// the stage and a slide strip to a host page that drives it with postMessage (the host protocol).
 
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.1.0"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.6.5"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
+// The major of slides.json and of the host protocol; a host supports exactly one.
+const CONTRACT = 1;
+const TYPE_ROOT = "/_type/";
+const THEME_ID_RE = /^[a-z0-9-]{1,32}$/;
+const UNICODE_RANGE_RE = /^\s*U\+[0-9a-f?]{1,6}(-[0-9a-f]{1,6})?(\s*,\s*U\+[0-9a-f?]{1,6}(-[0-9a-f]{1,6})?)*\s*$/i;
 const W = 1920;
 const H = 1080;
 const DATA_ROOT = "/project/";
@@ -18,7 +25,7 @@ const NO_FOOTER_LAYOUTS = new Set(["title", "section", "image", "blank"]);
 const TOKENS = ["background", "surface", "foreground", "muted", "accent", "onAccent", "border"];
 const FONT_ROLES = ["display", "body", "mono"];
 const DECK_KEYS = new Set(["v", "title", "lang", "order", "sections", "theme"]);
-const THEME_KEYS = new Set(["scheme", "light", "dark", "fonts"]);
+const THEME_KEYS = new Set(["preset", "scheme", "light", "dark", "fonts"]);
 const POLL_MIN_MS = 2000;
 const POLL_MAX_MS = 15000;
 const FETCH_CONCURRENCY = 6;
@@ -37,6 +44,7 @@ const STRINGS = {
     smaller: "Smaller notes", larger: "Larger notes", blackout: "Black screen", goTo: "Go to slide number",
     firstLast: "First or last slide", stepOf: "Step {n} of {total}",
     updated: "This presentation was updated. Reload the page to see the new version.", reload: "Reload",
+    exportPptx: "Download as PowerPoint", exporting: "Exporting slide {n} of {total}…", exportFailed: "The PowerPoint file could not be created",
   },
   de: {
     slides: "Folien", previous: "Vorherige Folie", next: "Nächste Folie", overview: "Übersicht", close: "Schließen",
@@ -51,6 +59,7 @@ const STRINGS = {
     smaller: "Kleinere Notizen", larger: "Größere Notizen", blackout: "Schwarzer Bildschirm", goTo: "Zu Foliennummer springen",
     firstLast: "Erste oder letzte Folie", stepOf: "Schritt {n} von {total}",
     updated: "Diese Präsentation wurde aktualisiert. Laden Sie die Seite neu, um die neue Version zu sehen.", reload: "Neu laden",
+    exportPptx: "Als PowerPoint herunterladen", exporting: "Folie {n} von {total} wird exportiert…", exportFailed: "Die PowerPoint-Datei konnte nicht erstellt werden",
   },
   es: {
     slides: "Diapositivas", previous: "Diapositiva anterior", next: "Diapositiva siguiente", overview: "Vista general", close: "Cerrar",
@@ -65,6 +74,7 @@ const STRINGS = {
     smaller: "Notas más pequeñas", larger: "Notas más grandes", blackout: "Pantalla en negro", goTo: "Ir al número de diapositiva",
     firstLast: "Primera o última diapositiva", stepOf: "Paso {n} de {total}",
     updated: "Esta presentación se ha actualizado. Recarga la página para ver la nueva versión.", reload: "Recargar",
+    exportPptx: "Descargar como PowerPoint", exporting: "Exportando la diapositiva {n} de {total}…", exportFailed: "No se pudo crear el archivo de PowerPoint",
   },
   fr: {
     slides: "Diapositives", previous: "Diapositive précédente", next: "Diapositive suivante", overview: "Vue d’ensemble", close: "Fermer",
@@ -79,6 +89,7 @@ const STRINGS = {
     smaller: "Notes plus petites", larger: "Notes plus grandes", blackout: "Écran noir", goTo: "Aller au numéro de diapositive",
     firstLast: "Première ou dernière diapositive", stepOf: "Étape {n} sur {total}",
     updated: "Cette présentation a été mise à jour. Rechargez la page pour voir la nouvelle version.", reload: "Recharger",
+    exportPptx: "Télécharger au format PowerPoint", exporting: "Export de la diapositive {n} sur {total}…", exportFailed: "Le fichier PowerPoint n’a pas pu être créé",
   },
   pl: {
     slides: "Slajdy", previous: "Poprzedni slajd", next: "Następny slajd", overview: "Przegląd", close: "Zamknij",
@@ -93,6 +104,7 @@ const STRINGS = {
     smaller: "Mniejsze notatki", larger: "Większe notatki", blackout: "Czarny ekran", goTo: "Przejdź do slajdu o numerze",
     firstLast: "Pierwszy lub ostatni slajd", stepOf: "Krok {n} z {total}",
     updated: "Ta prezentacja została zaktualizowana. Odśwież stronę, aby zobaczyć nową wersję.", reload: "Odśwież",
+    exportPptx: "Pobierz jako PowerPoint", exporting: "Eksportowanie slajdu {n} z {total}…", exportFailed: "Nie udało się utworzyć pliku PowerPoint",
   },
   ru: {
     slides: "Слайды", previous: "Предыдущий слайд", next: "Следующий слайд", overview: "Обзор", close: "Закрыть",
@@ -107,6 +119,7 @@ const STRINGS = {
     smaller: "Уменьшить заметки", larger: "Увеличить заметки", blackout: "Чёрный экран", goTo: "Перейти к слайду по номеру",
     firstLast: "Первый или последний слайд", stepOf: "Шаг {n} из {total}",
     updated: "Эта презентация обновлена. Перезагрузите страницу, чтобы увидеть новую версию.", reload: "Перезагрузить",
+    exportPptx: "Скачать в формате PowerPoint", exporting: "Экспорт слайда {n} из {total}…", exportFailed: "Не удалось создать файл PowerPoint",
   },
 };
 
@@ -130,6 +143,7 @@ const ICONS = {
   shrink: '<path d="M8 3.5V6a2 2 0 0 1-2 2H3.5M20.5 8H18a2 2 0 0 1-2-2V3.5M3.5 16H6a2 2 0 0 1 2 2v2.5M16 20.5V18a2 2 0 0 1 2-2h2.5"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6"/><path d="M12 16.8v.1"/>',
   print: '<path d="M6.5 9V3.5h11V9"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6.5 14h11v6.5h-11z"/>',
+  download: '<path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5M4 16.5v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
   close: '<path d="M18 6L6 18M6 6l12 12"/>',
   pause: '<path d="M8.5 5v14M15.5 5v14"/>',
   play: '<path d="M7.5 5.5l11 6.5-11 6.5z"/>',
@@ -179,7 +193,22 @@ const initialHash = parseHash();
 const params = new URLSearchParams(location.search);
 const CHECK = params.get("check") === "1";
 const PRESENTER = params.get("presenter") === "1";
+const EMBED = params.get("embed") === "1" && !CHECK && !PRESENTER;
+const THUMBNAIL = params.get("thumb") === "1" && !CHECK && !PRESENTER;
+const HOST_ORIGIN = EMBED || PRESENTER ? hostOrigin(params.get("host")) : null;
 const app = document.getElementById("app");
+
+// The host parameter must be exactly an http(s) origin: it is the only origin the viewer talks to.
+function hostOrigin(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  return (url.protocol === "https:" || url.protocol === "http:") && url.origin === value ? value : null;
+}
+if (EMBED && !HOST_ORIGIN) console.error(`[slides] embed=1 needs host=<origin of the host page>, got ${JSON.stringify(params.get("host"))}; the host protocol is off`);
 document.documentElement.lang = UI_LANG;
 
 const state = {
@@ -209,7 +238,7 @@ function validColor(value) {
 
 function normalizeDeck(raw) {
   const issues = [];
-  const deck = { title: "", lang: null, order: [], sections: [], theme: { scheme: null, light: {}, dark: {}, fonts: {} } };
+  const deck = { title: "", lang: null, order: [], sections: [], theme: { preset: null, scheme: null, light: {}, dark: {}, fonts: {} } };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     issues.push(issue("error", "deck-not-object", "deck.json must be a JSON object"));
     return { deck, issues };
@@ -272,6 +301,10 @@ function normalizeDeck(raw) {
       for (const key of Object.keys(theme)) {
         if (!THEME_KEYS.has(key)) issues.push(issue("warning", "theme-key-unknown", `Unknown theme key "${key}" is ignored`));
       }
+      if (theme.preset != null) {
+        if (themes.has(theme.preset)) deck.theme.preset = theme.preset;
+        else issues.push(issue("error", "unknown-preset", `theme "preset" ${JSON.stringify(theme.preset)} is not a theme of this site type, so the deck shows "${defaultThemeId}"; known: ${[...themes.keys()].join(", ")}`));
+      }
       if (theme.scheme != null) {
         if (theme.scheme === "light" || theme.scheme === "dark") deck.theme.scheme = theme.scheme;
         else issues.push(issue("warning", "theme-scheme", 'theme "scheme" must be "light" or "dark"'));
@@ -330,17 +363,26 @@ function fontFaceUrl(value) {
 function fontWeight(value, role, issues) {
   if (value == null) return "400";
   const weight = String(value).trim();
-  if (/^(normal|bold|[1-9]\d{0,2}( [1-9]\d{0,2})?)$/.test(weight)) return weight;
+  if (/^(normal|bold|(1000|[1-9]\d{0,2})( (1000|[1-9]\d{0,2}))?)$/.test(weight)) return weight;
   issues.push(issue("warning", "font-weight", `fonts.${role}.faces weight ${JSON.stringify(value)} is not a CSS weight such as 400 or "100 900"; 400 is used`));
   return "400";
 }
 
-function normalizeFont(role, spec, issues) {
+// A path inside the package, served under /_type/.
+function typeFileUrl(value) {
+  if (typeof value !== "string" || !value || /^[a-z][a-z0-9+.-]*:|^\/|\\/i.test(value)) return null;
+  const url = new URL(value, location.origin + TYPE_ROOT);
+  return url.origin === location.origin && url.pathname.startsWith(TYPE_ROOT) && !url.search && !url.hash ? url.pathname : null;
+}
+
+// Deck fonts load from project/ or Google Fonts; theme fonts (`fromType`) load from the package and
+// may split a family into unicode-range subsets.
+function normalizeFont(role, spec, issues, { fromType = false } = {}) {
   if (!spec || typeof spec !== "object" || typeof spec.family !== "string" || !spec.family.trim() || spec.family.length > 100) {
     issues.push(issue("warning", "font-family", `fonts.${role} needs a "family" string`));
     return null;
   }
-  const font = { family: spec.family.trim(), href: null, faces: [] };
+  const font = { family: spec.family.trim(), href: null, faces: [], fromType };
   if (spec.href != null) {
     if (fontStylesheetUrl(spec.href)) font.href = fontStylesheetUrl(spec.href);
     else issues.push(issue("warning", "font-href", `fonts.${role}.href must be a ${FONT_STYLESHEET_ORIGIN}/ stylesheet URL`));
@@ -350,20 +392,99 @@ function normalizeFont(role, spec, issues) {
       issues.push(issue("warning", "font-faces", `fonts.${role}.faces must be an array`));
     } else {
       for (const face of spec.faces) {
-        const src = fontFaceUrl(face?.src);
+        const src = fromType ? typeFileUrl(face?.src) : fontFaceUrl(face?.src);
         if (!src) {
-          issues.push(issue("warning", "font-face-src", `Each fonts.${role}.faces entry needs a "src" under project/ or on ${FONT_FILE_ORIGINS.join(" or ")}`));
+          issues.push(issue("warning", "font-face-src", fromType
+            ? `Each fonts.${role}.faces entry needs a "src" relative to the package root`
+            : `Each fonts.${role}.faces entry needs a "src" under project/ or on ${FONT_FILE_ORIGINS.join(" or ")}`));
           continue;
         }
-        font.faces.push({
-          src,
-          weight: fontWeight(face.weight, role, issues),
-          style: face.style === "italic" ? "italic" : "normal",
-        });
+        const entry = { src, weight: fontWeight(face.weight, role, issues), style: face.style === "italic" ? "italic" : "normal", unicodeRange: null };
+        if (fromType && face.unicodeRange != null) {
+          if (typeof face.unicodeRange === "string" && UNICODE_RANGE_RE.test(face.unicodeRange)) entry.unicodeRange = face.unicodeRange.trim();
+          else issues.push(issue("warning", "font-unicode-range", `fonts.${role}.faces unicodeRange ${JSON.stringify(face.unicodeRange)} is not a CSS unicode-range such as "U+0000-00FF, U+0131"`));
+        }
+        font.faces.push(entry);
       }
     }
   }
   return font;
+}
+
+// The package's themes, from /_type/slides.json. A fork replaces that file and its assets, not this
+// code. A problem in it is a package bug: check mode reports it as an error on every deck, and a theme
+// that fails to load is left out.
+const themes = new Map(); // id -> { id, scheme, light, dark, fonts, stylesheet }
+const themeSheets = new Map(); // id -> CSSStyleSheet
+const typeIssues = [];
+let defaultThemeId = null;
+let activeThemeId = null;
+
+function normalizeThemes(raw) {
+  const bad = (message) => typeIssues.push(issue("error", "slides-json-invalid", `_type/slides.json: ${message}`));
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return bad("must be a JSON object");
+  if (raw.contract !== CONTRACT) bad(`"contract" must be ${CONTRACT}, got ${JSON.stringify(raw.contract)}`);
+  if (!Array.isArray(raw.themes) || !raw.themes.length) return bad('"themes" must be a non-empty array');
+  raw.themes.forEach((entry, at) => {
+    const where = `themes[${at}]`;
+    if (!entry || typeof entry !== "object" || typeof entry.id !== "string" || !THEME_ID_RE.test(entry.id)) return bad(`${where}.id must be 1-32 lowercase letters, digits and hyphens`);
+    if (themes.has(entry.id)) return bad(`theme "${entry.id}" is listed twice`);
+    const theme = { id: entry.id, scheme: entry.scheme, light: {}, dark: {}, fonts: {}, stylesheet: null };
+    for (const key of ["title", "description"]) {
+      if (typeof entry[key] !== "string" || !entry[key].trim()) bad(`${where}.${key} must be a non-empty string`);
+    }
+    if (entry.scheme !== "light" && entry.scheme !== "dark") {
+      bad(`${where}.scheme must be "light" or "dark"`);
+      theme.scheme = "light";
+    }
+    for (const scheme of ["light", "dark"]) {
+      for (const name of TOKENS) {
+        const value = entry.colors?.[scheme]?.[name];
+        if (validColor(value)) theme[scheme][name] = value;
+        else bad(`${where}.colors.${scheme}.${name} must be a CSS color, got ${JSON.stringify(value)}`);
+      }
+    }
+    if (entry.fonts != null) {
+      const fontIssues = [];
+      for (const [role, spec] of Object.entries(entry.fonts)) {
+        if (!FONT_ROLES.includes(role)) fontIssues.push(issue("warning", "font-role-unknown", `unknown font role "${role}"`));
+        const font = FONT_ROLES.includes(role) ? normalizeFont(role, spec, fontIssues, { fromType: true }) : null;
+        if (font) theme.fonts[role] = font;
+      }
+      for (const item of fontIssues) bad(`${where}: ${item.message}`);
+    }
+    if (entry.stylesheet != null) {
+      theme.stylesheet = /\.css$/i.test(entry.stylesheet) ? typeFileUrl(entry.stylesheet) : null;
+      if (!theme.stylesheet) bad(`${where}.stylesheet must be a .css file relative to the package root`);
+    }
+    if (typeof entry.preview !== "string" || !/\.(svg|png)$/i.test(entry.preview) || !typeFileUrl(entry.preview)) bad(`${where}.preview must be an .svg or .png file relative to the package root`);
+    themes.set(theme.id, theme);
+  });
+  if (themes.has(raw.defaultTheme)) defaultThemeId = raw.defaultTheme;
+  else bad(`"defaultTheme" ${JSON.stringify(raw.defaultTheme)} is not a theme id`);
+}
+
+async function loadThemes() {
+  const response = await fetch(`${TYPE_ROOT}slides.json`);
+  if (!response.ok) return typeIssues.push(issue("error", "slides-json-invalid", `_type/slides.json: HTTP ${response.status}`));
+  let raw;
+  try {
+    raw = JSON.parse(await response.text());
+  } catch (error) {
+    return typeIssues.push(issue("error", "slides-json-invalid", `_type/slides.json is not valid JSON: ${error.message}`));
+  }
+  normalizeThemes(raw);
+  // Every stylesheet loads up front, so a preset change after a deploy applies at once.
+  await Promise.all([...themes.values()].filter((theme) => theme.stylesheet).map(async (theme) => {
+    const sheetResponse = await fetch(theme.stylesheet);
+    if (!sheetResponse.ok) {
+      typeIssues.push(issue("error", "slides-json-invalid", `${theme.stylesheet}: HTTP ${sheetResponse.status}`));
+      return;
+    }
+    const sheet = new CSSStyleSheet({ baseURL: new URL(theme.stylesheet, location.origin).href });
+    sheet.replaceSync(await sheetResponse.text());
+    themeSheets.set(theme.id, sheet);
+  }));
 }
 
 // Inline slide HTML stays declarative: one slide is mounted several times at once (stage, overview,
@@ -504,6 +625,10 @@ function sanitizeStylesheet(cssText, issues) {
   return sheet;
 }
 
+// While a hand edit is sanitized for its file, the hook only removes: it keeps the author's relative
+// URLs and adds no attributes that exist for rendering (iframe sandbox, link target).
+let sanitizingFile = false;
+
 function rewriteAttr(node, name, fn) {
   const attr = node.getAttributeNode(name);
   if (!attr) return;
@@ -511,7 +636,7 @@ function rewriteAttr(node, name, fn) {
   if (value === null) {
     node.removeAttributeNode(attr);
     hookRemovals.push(`${name}="${attr.value.slice(0, 60)}"`);
-  } else if (value !== attr.value) {
+  } else if (value !== attr.value && !sanitizingFile) {
     attr.value = value;
   }
 }
@@ -544,13 +669,15 @@ purify.addHook("afterSanitizeAttributes", (node) => {
   if (node.hasAttribute("style")) {
     const scratch = document.createElement("div");
     scratch.setAttribute("style", node.getAttribute("style"));
-    if (sanitizeDeclarations(scratch.style)) hookRemovals.push("style declaration with url() or escapes");
-    node.setAttribute("style", scratch.style.cssText);
+    const removed = sanitizeDeclarations(scratch.style);
+    if (removed) hookRemovals.push("style declaration with url() or escapes");
+    if (removed || !sanitizingFile) node.setAttribute("style", scratch.style.cssText);
   }
   if (node.localName === "iframe") {
-    node.setAttribute("sandbox", IFRAME_SANDBOX);
+    if (!sanitizingFile) node.setAttribute("sandbox", IFRAME_SANDBOX);
     rewriteAttr(node, "data-poster", (value) => resourceUrl(value, { dataImage: true }));
   }
+  if (sanitizingFile) return;
   if (isLink && /^https?:\/\//i.test(node.getAttribute("href") || "")) {
     node.setAttribute("target", "_blank");
     node.setAttribute("rel", "noopener noreferrer");
@@ -576,6 +703,7 @@ function sanitizeSection(section, issues) {
 }
 
 const STEP_RE = /^\s*[1-9]\d{0,2}\s*$/;
+const NODE_ATTR = "data-slides-node";
 
 // Builds: data-step="N" puts an element in step N, and elements with the same number are revealed
 // together. Numbers only order the steps, so data-step 2 and 5 are steps 1 and 2. An element whose
@@ -631,6 +759,9 @@ function parseSlide(id, text) {
   const strayText = [...body.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
   const headStyles = [...doc.head.querySelectorAll("style")].map((node) => node.textContent);
   let section = sections[0];
+  // Every element of the file's section is numbered in document order, so a hand edit on the stage can
+  // be written back into the file's own markup (editSlideFile).
+  section?.querySelectorAll("*").forEach((el, at) => el.setAttribute(NODE_ATTR, String(at)));
 
   if (!section) {
     issues.push(issue("error", "no-section", "The file must contain one <section> element"));
@@ -752,6 +883,12 @@ async function loadSlide(id, force) {
     });
     return true;
   }
+  const edit = pendingEdits.get(id);
+  if (edit) {
+    if (result.text === edit.latest) pendingEdits.delete(id);
+    else if ((result.text === edit.base || edit.posted.has(result.text)) && edit.stale++ < PENDING_EDIT_REFRESHES) return false;
+    else pendingEdits.delete(id);
+  }
   if (current && current.text === result.text) return false;
   state.slides.set(id, { id, text: result.text, ...parseSlide(id, result.text) });
   return true;
@@ -798,6 +935,7 @@ async function refresh(force) {
     if (deckPatch) Object.assign(state, deckPatch);
     if (state.deckStatus === "ok") {
       for (const id of state.slides.keys()) if (!state.deck.order.includes(id)) state.slides.delete(id);
+      for (const id of pendingEdits.keys()) if (!state.deck.order.includes(id)) pendingEdits.delete(id);
     }
     const orderChanged = previousIds.join("\n") !== (state.deck?.order || []).join("\n");
     if (deckChanged || orderChanged || changedSlides.size) onDataChanged({ deckChanged, orderChanged, changedSlides, shownId });
@@ -935,25 +1073,43 @@ function connectDeployEvents() {
   connect();
 }
 
+function activeTheme() {
+  return themes.get(state.deck?.theme.preset ?? defaultThemeId) ?? null;
+}
+
+// Theme fonts fall back to the package's own families, which cover the scripts a theme font may lack.
+const THEME_FONT_FALLBACK = {
+  display: '"Inter Variable", var(--font-fallback)',
+  body: '"Inter Variable", var(--font-fallback)',
+  mono: '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+};
+
+// The preset's colors and fonts apply first; deck.json colors and fonts override them one by one.
 function applyTheme() {
   const root = document.documentElement;
   const theme = state.deck?.theme;
+  const preset = activeTheme();
+  activeThemeId = preset?.id ?? null;
+  if (activeThemeId) root.dataset.preset = activeThemeId;
+  else delete root.dataset.preset;
+  const sheet = themeSheets.get(activeThemeId);
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets.filter((item) => ![...themeSheets.values()].includes(item)), ...(sheet ? [sheet] : [])];
   for (const scheme of ["light", "dark"]) {
     for (const name of TOKENS) {
       const property = `--${scheme[0]}-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
-      const value = theme?.[scheme]?.[name];
+      const value = theme?.[scheme]?.[name] || preset?.[scheme]?.[name];
       if (value) root.style.setProperty(property, value);
       else root.style.removeProperty(property);
     }
   }
   for (const role of FONT_ROLES) {
-    const font = theme?.fonts?.[role];
+    const font = theme?.fonts?.[role] || preset?.fonts?.[role];
     if (!font) {
       root.style.removeProperty(`--font-${role}`);
       continue;
     }
     const family = `"${font.family.replace(/["\\\n\r]/g, "")}"`;
-    const fallback = role === "mono" ? 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' : 'var(--font-fallback)';
+    const fallback = font.fromType ? THEME_FONT_FALLBACK[role] : role === "mono" ? 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' : 'var(--font-fallback)';
     root.style.setProperty(`--font-${role}`, `${family}, ${fallback}`);
     if (font.href && !document.querySelector(`link[data-font-href="${CSS.escape(font.href)}"]`)) {
       const link = h("link", { rel: "stylesheet", href: font.href, "data-font-href": font.href });
@@ -964,10 +1120,11 @@ function applyTheme() {
       document.head.append(link);
     }
     for (const face of font.faces) {
-      const key = `${font.family}|${face.src}|${face.weight}|${face.style}`;
+      const key = `${font.family}|${face.src}|${face.weight}|${face.style}|${face.unicodeRange}`;
       if (loadedFaces.has(key)) continue;
       loadedFaces.add(key);
-      const fontFace = new FontFace(font.family, `url("${face.src.replace(/"/g, "%22")}")`, { weight: face.weight, style: face.style, display: "swap" });
+      const descriptors = { weight: face.weight, style: face.style, display: "swap", ...(face.unicodeRange ? { unicodeRange: face.unicodeRange } : {}) };
+      const fontFace = new FontFace(font.family, `url("${face.src.replace(/"/g, "%22")}")`, descriptors);
       document.fonts.add(fontFace);
       fontFace.load().catch(() => {});
     }
@@ -986,15 +1143,19 @@ function initialScheme() {
   return null;
 }
 const userScheme = initialScheme();
+// Once the visitor, the other window or the host picks a scheme, a deck update no longer changes it.
+let schemeChosen = Boolean(userScheme);
 
-function setScheme(scheme, { persist, broadcast } = {}) {
+function setScheme(scheme, { persist, broadcast, chosen } = {}) {
   state.scheme = scheme;
   document.documentElement.dataset.scheme = scheme;
+  if (chosen) schemeChosen = true;
   if (persist) {
     try { localStorage.setItem("slides-scheme", scheme); } catch {}
   }
   if (broadcast) sync.post({ kind: "scheme", scheme });
   for (const fn of schemeListeners) fn();
+  reportOutline();
 }
 const schemeListeners = [];
 
@@ -1008,7 +1169,7 @@ function sectionAt(index) {
 function buildFrame(index, { thumb = false, step = 0 } = {}) {
   const id = state.deck.order[index];
   const slide = state.slides.get(id);
-  const frame = h("div", { class: "frame", lang: state.deck.lang || null });
+  const frame = h("div", { class: "frame", lang: state.deck.lang || null, "data-preset": activeThemeId });
   if (!slide || slide.status === "missing" || slide.status === "error" || !slide.fragment) {
     frame.classList.add("is-placeholder");
     const failed = slide?.status === "error";
@@ -1045,8 +1206,10 @@ function buildFrame(index, { thumb = false, step = 0 } = {}) {
       media.muted = true;
       media.preload = "metadata";
     }
-    // Thumbnails, print and check keep the iframe and its sizing, but load nothing into it.
+    // Thumbnails, print and check keep the iframe and its sizing, but load nothing into it. The
+    // PowerPoint export links the app's poster to the address kept in data-app-src.
     for (const iframe of frame.querySelectorAll("iframe")) {
+      if (iframe.hasAttribute("src")) iframe.setAttribute("data-app-src", iframe.getAttribute("src"));
       iframe.removeAttribute("src");
       iframe.classList.add("embed-off");
       const poster = iframe.getAttribute("data-poster");
@@ -1085,7 +1248,9 @@ function handBackEscape(iframe) {
 
 function mountFrame(host, { frame, sheets, still }) {
   const root = host.shadowRoot || host.attachShadow({ mode: "open" });
-  root.adoptedStyleSheets = still ? [STILL_SHEET, slideSheet, ...sheets] : [slideSheet, ...sheets];
+  // The theme stylesheet sits between the built-in styles and the slide's own.
+  const theme = themeSheets.has(activeThemeId) ? [themeSheets.get(activeThemeId)] : [];
+  root.adoptedStyleSheets = [...(still ? [STILL_SHEET] : []), slideSheet, ...theme, ...sheets];
   // Still frames are pictures: clicks reach the overview button and nothing inside takes focus.
   frame.inert = Boolean(still);
   root.replaceChildren(frame);
@@ -1144,11 +1309,13 @@ function go(index, { from = "local", step = 0 } = {}) {
   if (!total()) return;
   const next = Math.max(0, Math.min(total() - 1, index));
   const moved = next !== state.index;
-  const nextStep = Math.max(0, Math.min(stepCount(next), step));
+  if (moved && editing.on) setEditing(false);
+  const nextStep = editing.on ? stepCount(next) : Math.max(0, Math.min(stepCount(next), step));
   const stepped = nextStep === state.step ? false : nextStep > state.step ? "forward" : "back";
   state.index = next;
   state.step = nextStep;
   syncHash();
+  reportSlide();
   view.render?.({ moved, stepped, full: false });
   if (from === "local") sync.post({ kind: "goto", id: currentId(), step: state.step });
 }
@@ -1161,7 +1328,7 @@ function goNext() {
 }
 
 function goPrevious() {
-  if (state.step > 0) go(state.index, { step: state.step - 1 });
+  if (state.step > 0 && !editing.on) go(state.index, { step: state.step - 1 });
   else if (state.index > 0) go(state.index - 1, { step: stepCount(state.index - 1) });
 }
 
@@ -1188,6 +1355,11 @@ let digitTimer = null;
 
 function onKeyDown(event) {
   if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === "Escape" && editing.on) {
+    event.preventDefault();
+    setEditing(false);
+    return;
+  }
   const target = event.composedPath()[0];
   if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
   if (document.querySelector("dialog[open]")) return;
@@ -1210,17 +1382,17 @@ function onKeyDown(event) {
     go(0);
   } else if (key === "End") {
     go(total() - 1, { step: stepCount(total() - 1) });
-  } else if (key === "o" || key === "g") {
+  } else if ((key === "o" || key === "g") && !EMBED) {
     openOverview();
-  } else if (key === "f") {
+  } else if (key === "f" && !EMBED) {
     toggleFullscreen();
   } else if (key === "s" || key === "p") {
-    if (!PRESENTER) openPresenter();
+    if (!PRESENTER && !EMBED) openPresenter();
   } else if (key === "t") {
     toggleScheme();
   } else if (key === "b" || key === ".") {
     setBlackout(!state.blackout, true);
-  } else if (key === "?") {
+  } else if (key === "?" && !EMBED) {
     openHelp();
   } else {
     handled = false;
@@ -1229,7 +1401,7 @@ function onKeyDown(event) {
 }
 
 function toggleScheme() {
-  setScheme(state.scheme === "dark" ? "light" : "dark", { persist: true, broadcast: true });
+  setScheme(state.scheme === "dark" ? "light" : "dark", { persist: true, broadcast: true, chosen: true });
 }
 
 function setBlackout(on, broadcast) {
@@ -1245,17 +1417,57 @@ function toggleFullscreen() {
 
 function openPresenter() {
   const url = `${location.pathname}?presenter=1${location.hash}`;
-  window.open(url, `slides-presenter-${location.host}`, "popup,width=1280,height=800");
+  const win = window.open(url, `slides-presenter-${location.host}`, "popup,width=1280,height=800");
+  if (win) sync.addPeer(win);
+  return win;
 }
 
-// Presenter and audience windows of this deck in one browser follow each other.
+// Presenter and audience windows of this deck in one browser follow each other. The BroadcastChannel
+// reaches the windows of this origin in one storage partition. An embedded viewer sits in its host's
+// partition, so messages also go straight to the windows this one knows: the presenter window it
+// opened, its opener and the opener's frames (a presenter window that a host page opened), and every
+// window of this origin that messaged it. A message can arrive both ways and is handled once.
 const sync = (() => {
   const role = PRESENTER ? "presenter" : "audience";
   const channel = "BroadcastChannel" in window ? new BroadcastChannel(`slides:${location.host}`) : null;
   const sender = Math.random().toString(36).slice(2);
-  const post = (message) => channel?.postMessage({ ...message, role, sender });
-  channel?.addEventListener("message", ({ data }) => {
+  const peers = new Set();
+  let hostPort = null;
+  const seen = new Set();
+  let sent = 0;
+  // Reading a window's location throws across origins, the only test of a WindowProxy's origin.
+  const sameOrigin = (win) => {
+    try {
+      return win.location.origin === location.origin;
+    } catch {
+      return false;
+    }
+  };
+  const targets = () => {
+    for (const peer of peers) if (peer.closed) peers.delete(peer);
+    const list = [...peers];
+    const opener = window.opener;
+    if (opener && !opener.closed) {
+      list.push(opener);
+      for (let i = 0; i < opener.length; i += 1) list.push(opener[i]);
+    }
+    return list.filter((win) => win !== window && !win.closed && sameOrigin(win));
+  };
+  const post = (message) => {
+    sent += 1;
+    const data = { ...message, role, sender, seq: `${sender}.${sent}` };
+    channel?.postMessage(data);
+    hostPort?.postMessage(data);
+    for (const peer of targets()) peer.postMessage({ slidesSync: data }, location.origin);
+  };
+  const receive = (data, source) => {
     if (!data || data.sender === sender || data.role === role) return;
+    if (data.seq) {
+      if (seen.has(data.seq)) return;
+      seen.add(data.seq);
+      if (seen.size > 200) seen.delete(seen.values().next().value);
+    }
+    if (source) peers.add(source);
     if (data.kind === "goto") {
       const step = Number.isInteger(data.step) ? data.step : 0;
       if (state.deck) goToId(data.id, { from: "remote", step });
@@ -1264,12 +1476,25 @@ const sync = (() => {
       post({ kind: "goto", id: currentId(), step: state.step });
       post({ kind: "scheme", scheme: state.scheme });
     } else if (data.kind === "scheme" && (data.scheme === "light" || data.scheme === "dark")) {
-      setScheme(data.scheme);
+      setScheme(data.scheme, { chosen: true });
     } else if (data.kind === "blackout" && !PRESENTER) {
       setBlackout(Boolean(data.on));
     }
+  };
+  channel?.addEventListener("message", ({ data }) => receive(data));
+  window.addEventListener("message", (event) => {
+    if (event.origin === location.origin && event.source && event.data?.slidesSync) receive(event.data.slidesSync, event.source);
   });
-  return { post };
+  return {
+    post,
+    addPeer: (win) => peers.add(win),
+    connectHostPort(port) {
+      hostPort?.close();
+      hostPort = port;
+      port.onmessage = ({ data }) => receive(data);
+      if (PRESENTER) post({ kind: "hello" });
+    },
+  };
 })();
 
 let overviewDialog = null;
@@ -1409,6 +1634,59 @@ function showNotice(kind) {
   return notice;
 }
 
+// Embed mode's slide strip: a still of every slide with its number, grouped by section.
+function slideStrip() {
+  const list = h("ol");
+  const nav = h("nav", { class: "strip", "aria-label": t("slides") }, list);
+  let items = [];
+  const paint = (index) => {
+    const item = items[index];
+    if (!item) return;
+    renderInto(item.slot, index, { thumb: true });
+    const title = state.slides.get(state.deck.order[index])?.title || state.deck.order[index];
+    item.button.setAttribute("aria-label", `${t("slideOf", { n: index + 1, total: total() })}: ${title}`);
+  };
+  const build = () => {
+    releaseSlots(list);
+    list.replaceChildren();
+    items = [];
+    if (state.deckStatus !== "ok") return;
+    state.deck.order.forEach((id, index) => {
+      const section = state.deck.sections.find((entry) => entry.start === index);
+      if (section) list.append(h("li", { class: "strip-section", "aria-hidden": "true", text: section.title }));
+      const slot = makeSlot();
+      const button = h("button", { type: "button", onclick: () => go(index) }, slot.slot);
+      items.push({ slot, button });
+      list.append(h("li", { class: "strip-item" }, h("span", { class: "strip-num", "aria-hidden": "true", text: String(index + 1) }), button));
+      paint(index);
+    });
+  };
+  // Scrolls only the strip: scrollIntoView could also scroll the host page.
+  const mark = (reveal) => {
+    items.forEach((item, index) => {
+      if (index === state.index) item.button.setAttribute("aria-current", "true");
+      else item.button.removeAttribute("aria-current");
+    });
+    const button = items[state.index]?.button;
+    if (!reveal || !button) return;
+    const box = nav.getBoundingClientRect();
+    const rect = button.getBoundingClientRect();
+    if (rect.top < box.top) nav.scrollTop -= box.top - rect.top + 12;
+    else if (rect.bottom > box.bottom) nav.scrollTop += rect.bottom - box.bottom + 12;
+    if (rect.left < box.left) nav.scrollLeft -= box.left - rect.left + 12;
+    else if (rect.right > box.right) nav.scrollLeft += rect.right - box.right + 12;
+  };
+  return {
+    nav,
+    dataChanged({ deckChanged, orderChanged, changedSlides }) {
+      if (deckChanged || orderChanged) build();
+      else for (const id of changedSlides) paint(state.deck.order.indexOf(id));
+      mark(true);
+    },
+    mark,
+  };
+}
+
 function audienceView() {
   const { slot, host } = makeSlot("stage");
   slot.setAttribute("role", "region");
@@ -1424,8 +1702,11 @@ function audienceView() {
     iconButton("grid", t("overview"), openOverview),
     iconButton("presenter", t("presenter"), openPresenter, "wide-only"),
     themeButton, fullButton,
+    iconButton("download", t("exportPptx"), downloadPptx, "wide-only export-btn"),
     iconButton("help", t("shortcuts"), openHelp, "wide-only"),
   );
+  // Embedded, the host page draws the controls; the viewer keeps the stage and adds the strip.
+  const strip = EMBED && !THUMBNAIL ? slideStrip() : null;
   let notice = null;
 
   const updateChrome = () => {
@@ -1445,19 +1726,37 @@ function audienceView() {
   let suppressClick = false;
   slot.addEventListener("click", (event) => {
     if (suppressClick) { suppressClick = false; return; }
-    if (!total() || String(getSelection()) !== "") return;
+    if (!total() || editing.on || String(getSelection()) !== "") return;
+    if (editing.enabled && stageTextBlock(event, host)) return;
     const interactive = event.composedPath().some((node) => node instanceof Element && node.matches("a, button, input, select, textarea, label, summary, details, video, audio, iframe, [contenteditable], [tabindex]"));
     if (interactive) return;
     const rect = slot.getBoundingClientRect();
     if (event.clientX - rect.left < rect.width / 3) goPrevious();
     else goNext();
   });
+  slot.addEventListener("dblclick", (event) => {
+    if (!editing.enabled || editing.on || app.classList.contains("presenting")) return;
+    const block = stageTextBlock(event, host);
+    if (!block) return;
+    const selection = stageSelection(host.shadowRoot);
+    const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    setEditing(true, host);
+    block.focus({ preventScroll: true });
+    if (range && block.contains(range.commonAncestorContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    reportSelection();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (editing.on && !event.composedPath().some((node) => node instanceof Element && node.hasAttribute("data-slides-edit"))) setEditing(false);
+  });
   let touch = null;
   slot.addEventListener("touchstart", (event) => {
     if (event.touches.length === 1) touch = { x: event.touches[0].clientX, y: event.touches[0].clientY };
   }, { passive: true });
   slot.addEventListener("touchend", (event) => {
-    if (!touch || event.changedTouches.length !== 1) return;
+    if (!touch || event.changedTouches.length !== 1 || editing.on) return;
     const dx = event.changedTouches[0].clientX - touch.x;
     const dy = event.changedTouches[0].clientY - touch.y;
     touch = null;
@@ -1478,10 +1777,13 @@ function audienceView() {
   for (const name of ["mousemove", "pointerdown", "keydown", "touchstart"]) window.addEventListener(name, wake, { passive: true });
   wake();
 
-  app.replaceChildren(slot, progress, h("div", { class: "blackout" }), toolbar, live);
+  app.replaceChildren(slot, progress, h("div", { class: "blackout" }), strip ? strip.nav : toolbar, live);
+  app.classList.toggle("embed", EMBED || THUMBNAIL);
+  app.classList.toggle("thumbnail", THUMBNAIL);
   updateChrome();
 
   return {
+    dataChanged: strip?.dataChanged,
     render({ moved, stepped, full } = {}) {
       notice?.remove();
       notice = null;
@@ -1489,6 +1791,7 @@ function audienceView() {
         host.shadowRoot?.replaceChildren();
         toolbar.hidden = true;
         progress.hidden = true;
+        if (strip) strip.nav.hidden = true;
         const kind = state.deckStatus === "loading" ? "loading" : state.deckStatus === "invalid" ? "error" : "empty";
         notice = showNotice(kind);
         app.prepend(notice);
@@ -1497,7 +1800,15 @@ function audienceView() {
       }
       toolbar.hidden = false;
       progress.hidden = false;
-      if (moved || full !== false) renderInto({ slot, host }, state.index, { step: state.step });
+      if (strip) {
+        strip.nav.hidden = false;
+        if (moved) strip.mark(true);
+      }
+      if (moved || full !== false) {
+        clearSlideSelection();
+        renderInto({ slot, host }, state.index, { step: state.step });
+        if (editing.on) makeEditable(host, state.index);
+      }
       else if (stepped) {
         // Screen readers do not announce content that becomes visible, so a step says what it revealed.
         const revealed = revealedText(showStep(host));
@@ -1794,13 +2105,15 @@ async function runCheck() {
       measure.remove();
     }
   }
-  const errors = state.deckIssues.filter((item) => item.level === "error").length + results.reduce((sum, slide) => sum + slide.issues.filter((item) => item.level === "error").length, 0);
-  const warnings = state.deckIssues.filter((item) => item.level === "warning").length + results.reduce((sum, slide) => sum + slide.issues.filter((item) => item.level === "warning").length, 0);
+  const all = [...typeIssues, ...state.deckIssues, ...results.flatMap((slide) => slide.issues)];
+  const errors = all.filter((item) => item.level === "error").length;
+  const warnings = all.filter((item) => item.level === "warning").length;
   const report = {
     type: TYPE_ID,
     ok: errors === 0,
     complete: !incomplete(),
-    deck: { status: state.deckStatus === "ok" && state.deckIssues.some((item) => item.level === "error") ? "error" : state.deckStatus, title: state.deck?.title || "", slides: total(), sections: (state.deck?.sections || []).map((section) => ({ id: section.id, title: section.title, start: state.deck.order[section.start] })), issues: state.deckIssues },
+    package: { issues: typeIssues },
+    deck: { status: state.deckStatus === "ok" && state.deckIssues.some((item) => item.level === "error") ? "error" : state.deckStatus, title: state.deck?.title || "", preset: activeThemeId, slides: total(), sections: (state.deck?.sections || []).map((section) => ({ id: section.id, title: section.title, start: state.deck.order[section.start] })), issues: state.deckIssues },
     summary: {
       errors,
       warnings,
@@ -1824,9 +2137,10 @@ function renderCheck(report, results) {
     h("span", { class: `check-status ${report.ok ? "ok" : "bad"}`, text: status }),
     h("span", { class: "fine", text: `${report.deck.slides} slides · ${report.summary.warnings} warning(s) · ${TYPE_ID}` }),
   ));
-  if (report.deck.issues.length) {
-    inner.append(h("div", { class: "check-row" }, h("div"), h("div", null, h("h2", { text: "project/deck.json" }),
-      h("ul", null, report.deck.issues.map((item) => h("li", { class: item.level, text: item.message }))))));
+  for (const [file, issues] of [["_type/slides.json", report.package.issues], ["project/deck.json", report.deck.issues]]) {
+    if (!issues.length) continue;
+    inner.append(h("div", { class: "check-row" }, h("div"), h("div", null, h("h2", { text: file }),
+      h("ul", null, issues.map((item) => h("li", { class: item.level, text: item.message }))))));
   }
   results.forEach((slide, index) => {
     const slot = makeSlot();
@@ -1856,7 +2170,7 @@ function renderCheck(report, results) {
 function onDataChanged({ deckChanged, orderChanged, changedSlides, shownId }) {
   if (deckChanged) {
     applyTheme();
-    if (!userScheme && state.deck?.theme.scheme) setScheme(state.deck.theme.scheme);
+    if (!schemeChosen) setScheme(state.deck?.theme.scheme || activeTheme()?.scheme || "light");
   }
   if (state.deckStatus === "ok" && total()) {
     const keep = state.pendingId ?? shownId ?? currentId();
@@ -1873,22 +2187,430 @@ function onDataChanged({ deckChanged, orderChanged, changedSlides, shownId }) {
     runCheck();
     return;
   }
+  // Typing still waiting for its pause is settled before a remount, as go() does: a new version of the
+  // edited slide wins and discards it; any other change keeps it, sent first so the new stage shows it.
+  if (editing.on && editing.dirty) {
+    if (changedSlides.has(editing.id)) {
+      clearTimeout(editing.timer);
+      editing.dirty = false;
+    } else {
+      flushEdit();
+    }
+  }
   // The current slide is remounted only when it changed, so a running app keeps its state.
   const full = deckChanged || orderChanged || changedSlides.has(currentId());
   view.render?.({ full });
+  view.dataChanged?.({ deckChanged, orderChanged, changedSlides });
+  reportOutline();
+  reportSlide();
   if (overviewDialog && (deckChanged || orderChanged || changedSlides.size)) {
     if (state.deckStatus === "ok" && total()) overviewDialog.refresh();
     else overviewDialog.close();
   }
 }
 
+// PowerPoint export. PptxGenJS (a classic script that also defines JSZip) and the exporter load on the
+// first export only. One export runs at a time; it reflects the slides as shown, local edits included.
+let pptxLibrary = null;
+let exportRunning = false;
+
+function loadPptxLibrary() {
+  pptxLibrary ||= new Promise((resolve, reject) => {
+    const script = h("script", { src: `${TYPE_ROOT}vendor/pptxgen.bundle.js` });
+    script.addEventListener("load", () => resolve({ PptxGenJS: window.PptxGenJS, JSZip: window.JSZip }), { once: true });
+    script.addEventListener("error", () => {
+      pptxLibrary = null;
+      reject(new Error("vendor/pptxgen.bundle.js could not be loaded"));
+    }, { once: true });
+    document.head.append(script);
+  });
+  return pptxLibrary;
+}
+
+async function exportPptx(onProgress) {
+  if (state.deckStatus !== "ok" || !total()) throw new Error("The presentation is not loaded");
+  if (exportRunning) throw Object.assign(new Error("An export is already running"), { code: "export-busy" });
+  exportRunning = true;
+  try {
+    const [{ PptxGenJS, JSZip }, { buildPptx }] = await Promise.all([loadPptxLibrary(), import(`${TYPE_ROOT}export-pptx.js`)]);
+    const { bytes, warnings } = await buildPptx({
+      PptxGenJS,
+      JSZip,
+      deck: { title: state.deck.title, lang: state.deck.lang, ids: [...state.deck.order] },
+      mountStill: (index, host) => {
+        mountFrame(host, buildFrame(index, { thumb: true }));
+        return { notes: state.slides.get(state.deck.order[index])?.notes || "" };
+      },
+      waitForMedia,
+      onProgress,
+    });
+    const base = (state.deck.title || t("slides")).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 120) || "slides";
+    return { format: "pptx", filename: `${base}.pptx`, bytes, warnings };
+  } finally {
+    exportRunning = false;
+  }
+}
+
+// The toolbar's export saves the file; a failure shows the error under the generic message.
+async function downloadPptx() {
+  const buttons = [...document.querySelectorAll(".export-btn")];
+  for (const button of buttons) button.disabled = true;
+  try {
+    const result = await exportPptx((n, count) => { live.textContent = t("exporting", { n, total: count }); });
+    const url = URL.createObjectURL(new Blob([result.bytes], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" }));
+    const link = h("a", { href: url, download: result.filename, hidden: true });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) {
+    showBanner(t("exportFailed"), String(error?.message || error));
+  } finally {
+    for (const button of buttons) button.disabled = false;
+  }
+}
+
+function showBanner(text, detail) {
+  document.querySelector(".update-banner")?.remove();
+  const banner = h("div", { class: "update-banner", role: "alert" },
+    h("span", null, text, detail ? h("small", { class: "banner-detail", text: detail }) : null),
+    iconButton("close", t("close"), () => banner.remove()),
+  );
+  document.body.append(banner);
+}
+
+// Edit mode (embed only): the text blocks on the stage become editable as plain text. Each change is
+// written back into the slide file's own markup, sanitized and sent to the host as `edited`, which
+// saves the file. The viewer shows the edit at once and keeps it while refreshes still return older
+// file versions; a version from another writer wins.
+const editing = { enabled: false, on: false, frame: null, text: "", baseHtml: "", id: null, timer: null, dirty: false, baseline: "" };
+let slideSelection = null;
+let selectionCounter = 0;
+const pendingEdits = new Map(); // slide id -> { base, posted: Set, latest, stale }
+// A host that never saves an edit (a failed save, a lost message) must not pin it on the stage: after
+// this many refreshes that still return an older file, the file wins again.
+const PENDING_EDIT_REFRESHES = 3;
+const EDIT_SKIP = "svg, math, iframe, video, audio, canvas, img, picture, object, embed, aside, style, select, textarea, input, button";
+const EDIT_SHEET = new CSSStyleSheet();
+EDIT_SHEET.replaceSync(`[data-slides-edit] { cursor: text; outline: none; }
+[data-slides-edit]:hover { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 45%, transparent); border-radius: 6px; }`);
+
+// Text blocks: the outermost elements with text whose content is inline only.
+function editableBlocks(section) {
+  const blocks = [];
+  const inlineOnly = (el) => [...el.children].every((child) => child.localName === "br"
+    || (!child.matches(EDIT_SKIP) && getComputedStyle(child).display.startsWith("inline") && inlineOnly(child)));
+  const walk = (el) => {
+    for (const child of el.children) {
+      if (child.matches(EDIT_SKIP) || !child.hasAttribute(NODE_ATTR)) continue;
+      if (/\S/.test(child.textContent) && inlineOnly(child)) blocks.push(child);
+      else walk(child);
+    }
+  };
+  if (section) walk(section);
+  return blocks;
+}
+
+function stageTextBlock(event, host) {
+  const blocks = editableBlocks(host.shadowRoot?.querySelector(".frame > section"));
+  return event.composedPath().find((node) => blocks.includes(node));
+}
+
+function stageSelection(root) {
+  return root?.getSelection?.() || window.getSelection();
+}
+
+function clearSlideSelection() {
+  if (!slideSelection) return;
+  slideSelection.observer.disconnect();
+  slideSelection = null;
+  postToHost("selection", { selection: null });
+}
+
+function reportSelection() {
+  if (!editing.on || !editing.frame?.isConnected) return;
+  // Parent toolbar focus may collapse the native selection; its captured range remains usable.
+  if (!document.hasFocus()) return;
+  const selection = stageSelection(editing.frame.getRootNode());
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const element = range?.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range?.startContainer.parentElement;
+  const block = element?.closest("[data-slides-edit]");
+  if (!range || !block || !editing.frame.contains(block)) return clearSlideSelection();
+  if (!block.contains(range.endContainer)) range.setEnd(block, block.childNodes.length);
+  const text = range.toString();
+  if (!text.trim()) return clearSlideSelection();
+  const previous = slideSelection;
+  if (previous && previous.range.startContainer === range.startContainer && previous.range.startOffset === range.startOffset
+    && previous.range.endContainer === range.endContainer && previous.range.endOffset === range.endOffset && previous.text === text) return;
+  clearSlideSelection();
+  const rect = range.getBoundingClientRect(); // Already includes the 1920×1080 stage's CSS transform.
+  const observer = new MutationObserver(clearSlideSelection);
+  observer.observe(block, { subtree: true, childList: true, characterData: true, attributes: true });
+  slideSelection = {
+    id: currentId(), token: String(++selectionCounter), range: range.cloneRange(), block, text,
+    markup: block.innerHTML, observer,
+    startNode: range.startContainer, startOffset: range.startOffset, endNode: range.endContainer, endOffset: range.endOffset,
+  };
+  postToHost("selection", { id: slideSelection.id, token: slideSelection.token, text,
+    rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } });
+}
+
+function replaceSlideSelection({ id, token, text }) {
+  if (typeof id !== "string" || typeof token !== "string" || typeof text !== "string") return hostError("command-invalid", 'replace needs "id", "token" and "text" strings');
+  const saved = slideSelection;
+  if (!editing.enabled || !editing.on || !saved || saved.id !== id || saved.token !== token || currentId() !== id
+    || !saved.block.isConnected || !editing.frame?.contains(saved.block) || saved.observer.takeRecords().length
+    || saved.block.innerHTML !== saved.markup || saved.range.toString() !== saved.text
+    || saved.range.startContainer !== saved.startNode || saved.range.startOffset !== saved.startOffset
+    || saved.range.endContainer !== saved.endNode || saved.range.endOffset !== saved.endOffset) {
+    clearSlideSelection();
+    return hostError("selection-stale", "Slide selection changed; select the text again before replacing it");
+  }
+  clearSlideSelection();
+  saved.range.deleteContents();
+  saved.range.insertNode(document.createTextNode(text));
+  stageSelection(editing.frame.getRootNode())?.removeAllRanges();
+  editing.dirty = true;
+  flushEdit();
+}
+
+document.addEventListener("selectionchange", reportSelection);
+window.addEventListener("resize", clearSlideSelection);
+document.addEventListener("scroll", clearSlideSelection, true);
+
+// Tells the host how many blocks of the slide on the stage can be edited (0 for a slide that is not
+// written yet or is malformed).
+function makeEditable(host, index) {
+  const id = state.deck.order[index];
+  const slide = state.slides.get(id);
+  const frame = host.shadowRoot?.querySelector(".frame");
+  clearTimeout(editing.timer);
+  Object.assign(editing, { frame: null, dirty: false });
+  if (!frame || slide?.status !== "ok") {
+    postToHost("editable", { id, count: 0 });
+    return postToHost("editing", { on: true, id, count: 0 });
+  }
+  host.shadowRoot.adoptedStyleSheets = [...host.shadowRoot.adoptedStyleSheets, EDIT_SHEET];
+  const blocks = editableBlocks(frame.querySelector(":scope > section"));
+  for (const block of blocks) {
+    block.setAttribute("contenteditable", "plaintext-only");
+    block.setAttribute("data-slides-edit", "");
+  }
+  // The file text this frame was built from (its node numbers index that text's elements), and the
+  // file this frame gives before any typing: only a different result is a hand edit.
+  Object.assign(editing, { frame, id, text: slide.text, baseHtml: slide.text });
+  editing.baseline = editSlideFile(slide.text, frame);
+  frame.addEventListener("input", () => {
+    clearSlideSelection();
+    editing.dirty = true;
+    clearTimeout(editing.timer);
+    editing.timer = setTimeout(flushEdit, 800);
+  });
+  frame.addEventListener("focusout", flushEdit);
+  postToHost("editable", { id, count: blocks.length });
+  postToHost("editing", { on: true, id, count: blocks.length });
+}
+
+function flushEdit() {
+  clearTimeout(editing.timer);
+  if (!editing.frame?.isConnected || !editing.dirty) return;
+  editing.dirty = false;
+  const { id, baseHtml } = editing;
+  const html = editSlideFile(editing.text, editing.frame);
+  const slide = state.slides.get(id);
+  if (!slide || html === editing.baseline) return;
+  editing.baseline = html;
+  editing.baseHtml = html;
+  const pending = pendingEdits.get(id) || { base: baseHtml, posted: new Set(), latest: null, stale: 0 };
+  pending.posted.add(html);
+  pending.latest = html;
+  pending.stale = 0;
+  pendingEdits.set(id, pending);
+  state.slides.set(id, { id, text: html, ...parseSlide(id, html) });
+  postToHost("edited", { id, path: `project/slides/${id}.html`, html, baseHtml });
+  view.dataChanged?.({ deckChanged: false, orderChanged: false, changedSlides: new Set([id]) });
+  reportOutline();
+}
+
+// The file's section with the text of every edited block taken from the stage. Elements inside a
+// block keep the file's own tag and attributes; markup the editor added is reduced to <br> and text.
+// A <style> before the section, which rendering applies too, moves into the section.
+function editSlideFile(fileText, frame) {
+  const doc = new DOMParser().parseFromString(fileText, "text/html");
+  const section = [...doc.body.children].find((node) => node.localName === "section");
+  const sourceNodes = [...section.querySelectorAll("*")];
+  const headStyles = [...doc.head.querySelectorAll("style")];
+  const restore = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return [doc.createTextNode(node.data)];
+    if (node.nodeType !== Node.ELEMENT_NODE) return [];
+    const source = sourceNodes[Number(node.getAttribute(NODE_ATTR))];
+    const children = [...node.childNodes].flatMap(restore);
+    if (!node.hasAttribute(NODE_ATTR) || !source) return node.localName === "br" ? [doc.createElement("br")] : children;
+    const copy = source.cloneNode(false);
+    copy.append(...children);
+    return [copy];
+  };
+  for (const block of frame.querySelectorAll("[data-slides-edit]")) {
+    sourceNodes[Number(block.getAttribute(NODE_ATTR))]?.replaceChildren(...[...block.childNodes].flatMap(restore));
+  }
+  section.prepend(...headStyles);
+  return `${sanitizeSlideFile(section)}\n`;
+}
+
+// The same sanitizer as rendering, in file mode. Slide CSS keeps its text as written: rendering sanitizes
+// it on every load, and text parsed out of a <style> cannot contain the tag's end, so it writes back
+// unchanged. Re-serializing the CSSOM instead would resolve escapes into markup.
+function sanitizeSlideFile(section) {
+  const styles = [...section.querySelectorAll("style")];
+  for (const style of styles) style.remove();
+  sanitizingFile = true;
+  let clean;
+  try {
+    clean = purify.sanitize(section, PURIFY_CONFIG).querySelector("section");
+  } finally {
+    sanitizingFile = false;
+  }
+  for (const style of styles.reverse()) {
+    const element = clean.ownerDocument.createElement("style");
+    element.textContent = style.textContent;
+    clean.prepend(element);
+  }
+  return clean.outerHTML;
+}
+
+function setEditing(on, host = null) {
+  if (on === editing.on) return;
+  clearSlideSelection();
+  if (!on) flushEdit();
+  editing.on = on;
+  editing.frame = null;
+  // Every step is shown while editing, so every text can be reached.
+  if (on && state.deck) state.step = stepCount();
+  if (state.deck) syncHash();
+  if (on && host) {
+    showStep(host);
+    makeEditable(host, state.index);
+  } else view.render?.({ full: true });
+  if (!on) postToHost("editing", { on: false, id: currentId(), count: 0 });
+}
+
+// Embed mode's host protocol. The host frames /?embed=1&host=<its origin>#<slide id> and exchanges
+// {slides: CONTRACT, type, ...} messages with the viewer. The envelope owns `slides` and `type`, so
+// `ready` names the site type `siteType`, and `ready` and `outline` carry the outline as `outline`.
+// Commands are taken only from the parent window at the host origin, and messages go only to the parent with the host origin as target, never "*";
+// who may frame a private deck is Spot's frame-ancestors policy. Unknown types are ignored.
+const embedHost = { ready: false, outline: "", slide: "" };
+
+function postToHost(type, body, transfer = []) {
+  if (HOST_ORIGIN && window.parent !== window) window.parent.postMessage({ ...body, slides: CONTRACT, type }, { targetOrigin: HOST_ORIGIN, transfer });
+}
+
+function deckOutline() {
+  return {
+    title: state.deck?.title || "",
+    theme: { preset: activeThemeId, scheme: state.scheme },
+    slides: state.deckStatus === "ok" ? state.deck.order.map((id, index) => ({
+      id,
+      title: state.slides.get(id)?.title || id,
+      section: sectionAt(index)?.title ?? null,
+      missing: state.slides.get(id)?.status === "missing",
+    })) : [],
+  };
+}
+
+// outline and slide are posted when they differ from the last one the host got.
+function reportOutline() {
+  if (!embedHost.ready) return;
+  const outline = deckOutline();
+  const text = JSON.stringify(outline);
+  if (text === embedHost.outline) return;
+  embedHost.outline = text;
+  postToHost("outline", { outline });
+}
+
+function reportSlide() {
+  if (!embedHost.ready || !currentId()) return;
+  const slide = { id: currentId(), index: state.index };
+  const text = JSON.stringify(slide);
+  if (text === embedHost.slide) return;
+  embedHost.slide = text;
+  postToHost("slide", slide);
+}
+
+function announceReady() {
+  const outline = deckOutline();
+  embedHost.ready = true;
+  embedHost.outline = JSON.stringify(outline);
+  postToHost("ready", { contract: CONTRACT, siteType: { name: TYPE_NAME, version: TYPE_VERSION }, outline });
+  reportSlide();
+}
+
+const hostError = (code, message) => postToHost("error", { code, message });
+
+const HOST_COMMANDS = {
+  goto({ id }) {
+    if (typeof id !== "string") return hostError("command-invalid", 'goto needs an "id" string');
+    if (!state.deck) return Object.assign(state, { pendingId: id, pendingStep: 0 });
+    if (!state.deck.order.includes(id)) return hostError("slide-unknown", `There is no slide "${id}" in this deck`);
+    goToId(id);
+  },
+  // The host makes this frame fullscreen itself; presenting is the stage alone, navigation unchanged.
+  present({ on }) {
+    if (typeof on !== "boolean") return hostError("command-invalid", 'present needs "on": true or false');
+    app.classList.toggle("presenting", on);
+  },
+  print() {
+    window.print();
+  },
+  edit({ on, enabled }) {
+    if (typeof on !== "boolean") return hostError("command-invalid", 'edit needs "on": true or false');
+    if (enabled !== undefined && typeof enabled !== "boolean") return hostError("command-invalid", 'edit "enabled" must be true or false');
+    if (enabled !== undefined) editing.enabled = enabled;
+    else if (on) editing.enabled = true; // A legacy host's edit-on is an explicit permission grant.
+    setEditing(editing.enabled && on);
+  },
+  replace: replaceSlideSelection,
+  "clear-selection"() {
+    clearSlideSelection();
+    if (editing.frame) stageSelection(editing.frame.getRootNode())?.removeAllRanges();
+  },
+  // Progress goes out per slide; the bytes are transferred, not copied.
+  async export({ format }) {
+    if (format !== "pptx") return hostError("command-invalid", 'export needs "format": "pptx"');
+    try {
+      const result = await exportPptx((done, count) => postToHost("exporting", { done, total: count }));
+      postToHost("exported", result, [result.bytes]);
+    } catch (error) {
+      hostError(error?.code || "export-failed", String(error?.message || error));
+    }
+  },
+  scheme({ scheme }) {
+    if (scheme !== "light" && scheme !== "dark") return hostError("command-invalid", 'scheme needs "light" or "dark"');
+    setScheme(scheme, { broadcast: true, chosen: true });
+  },
+};
+
+if (HOST_ORIGIN) {
+  window.addEventListener("message", (event) => {
+    if (!event.source || event.origin !== HOST_ORIGIN) return;
+    const data = event.data;
+    if (!data || typeof data !== "object" || data.slides !== CONTRACT) return;
+    if (data.type === "connect-sync" && event.ports.length === 1) {
+      sync.connectHostPort(event.ports[0]);
+      return;
+    }
+    if (event.source !== window.parent || !EMBED || !Object.hasOwn(HOST_COMMANDS, data.type)) return;
+    HOST_COMMANDS[data.type](data);
+  });
+}
+
 async function start() {
   try { sessionStorage.removeItem(`slides-reload:${TYPE_ID}`); } catch {}
   setScheme(userScheme || "light");
-  const css = await fetch("/_type/slide.css").then((response) => {
+  const [css] = await Promise.all([fetch("/_type/slide.css").then((response) => {
     if (!response.ok) throw new Error(`slide.css: HTTP ${response.status}`);
     return response.text();
-  });
+  }), loadThemes()]);
   slideSheet = new CSSStyleSheet();
   slideSheet.replaceSync(css);
   document.body.append(printRoot);
@@ -1898,6 +2620,7 @@ async function start() {
   const changed = await refresh(false);
   if (!changed) onDataChanged({ deckChanged: false, orderChanged: false, changedSlides: new Set() });
   app.removeAttribute("aria-busy");
+  if (EMBED) announceReady();
   if (PRESENTER) sync.post({ kind: "hello" });
   connectDeployEvents();
   schedulePoll(true);

@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "title": "Embedded deck",
+  "order": ["cover", "agenda", "results", "next"],
+  "sections": { "body": { "title": "Results", "start": "results" } }
+}

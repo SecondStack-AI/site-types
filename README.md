@@ -4,7 +4,7 @@ Site types for SecondStack Sites. A site type is a viewer that many sites share:
 
 | Folder | Type |
 |---|---|
-| [`slides/`](./slides) | Slides: a presentation deck, one HTML section per slide, in a 16:9 viewer with overview, presenter view, fullscreen and print to PDF. |
+| [`slides/`](./slides) | Slides: a presentation deck, one HTML section per slide, in a 16:9 viewer with themes, overview, presenter view, fullscreen, print to PDF, PowerPoint export and an embed mode for host apps, with hand edits of slide text. |
 
 ## Layout
 
@@ -15,7 +15,7 @@ A package is:
 - `type.json`: `format`, `name`, `version` (SemVer), `title`, `description` and `data`, the data paths a site of this type may write;
 - `index.html`: the viewer entry;
 - `SKILL.md`: optional instructions that agents read before they write a site of this type;
-- the other viewer files (scripts, styles, fonts).
+- the other viewer files (scripts, styles, fonts), and for the Slides family `slides.json` (see below).
 
 Links, dot files and `node_modules` are not allowed in a package. A package has at most 2,000 files and 90 MiB.
 
@@ -38,14 +38,66 @@ Installing a type means trusting it. Its viewer runs with the visitor's authorit
 
 1. Fork this repository, or copy one type folder into your own repository.
 2. Change the viewer, and bump `version` in `type.json`. An installed version can never change: an upload with different bytes under an installed version is refused. Develop under a prerelease version, for example `1.1.0-dev.1`.
-3. To run your fork beside the original, rename the type: change `name` in `type.json`.
+3. To run your fork beside the original, rename the type: change `name` in `type.json` and `TYPE_NAME` in `slides/viewer.js`.
 4. Install your folder URL in ControlTower, and press **Reload sources** after each release.
+
+To give a Slides fork its own themes, replace `slides.json` and add the theme assets; the viewer code stays as it is. Fonts go in the package with `faces[].unicodeRange` for subset files. A theme stylesheet sets the shape tokens `--heading-weight-shift`, `--heading-tracking`, `--radius-scale` and `--eyebrow-tracking` on `:root[data-preset="<id>"]`, and scopes slide rules to the slide frames with `:where(.frame[data-preset="<id>"])`: the stylesheet also applies to the viewer's own page, so a rule scoped to `[data-preset]` alone would also decorate the overview, dialogs and presenter view. The `:where()` keeps a slide's own `<style>` winning over theme rules. `node checks/preview.mjs` renders every theme's preview image.
 
 ## Compatibility rule
 
 Every SecondStack site follows the newest version of its type's major. So a minor or patch release must keep the data contract and keep existing sites working: the data paths, the data format and every building block that `SKILL.md` documents change only additively. A change that breaks this is a new major version.
 
-For Slides this means: within a major, the 1920×1080 frame, the default palette and fonts, the layouts and every building block `SKILL.md` documents change only additively. Sanitizer changes are the exception and are allowed for security. Anything else is a new major, which also bumps `deck.json` `v`.
+For Slides this means: within a major, the 1920×1080 frame, the default theme, the layouts and every building block `SKILL.md` documents change only additively, and so do `slides.json` and the host protocol within their `contract`. Sanitizer changes are the exception and are allowed for security. Anything else is a new major, which also bumps `deck.json` `v`.
+
+## Slides host contract
+
+The Slides family is every type whose package has `slides.json` at its root; Spot serves it as `/_type/slides.json`. Contract 1:
+
+- `contract`: `1`, the major of this file and of the host protocol.
+- `defaultTheme`: the theme of a deck without `theme.preset`, and of a deck whose preset is unknown (check mode reports `unknown-preset`).
+- `themes`: each with `id` (`[a-z0-9-]{1,32}`), `title`, `description`, `scheme` (`light` or `dark`, the default of a deck in this theme), `colors.light` and `colors.dark` with the seven `deck.json` color roles, optional `fonts` (the `deck.json` roles, `faces[].src` relative to the package root, optional `faces[].unicodeRange`), optional `stylesheet` and `preview` (a 16:9 PNG or SVG that hosts show as the swatch). Paths are relative to the package root.
+- Optional `starters`: a catalog JSON path with a `starters` array. Each example owns its `id`, `title`, `description`, brief `hint`, `coverTitle`, `coverLabel`, `directory` (`starters/<id>`), `showcase` slide index, plan `blocks` (`id`, `title`, `note`, `level`, sample HTML paths relative to the example directory) and `slides` (`id`, `title`, `previews` mapping each enabled theme to a package PNG). The directory contains a real `project/deck.json` and sample slide files. Hosts display the images; agents read the same catalog and samples to adapt the example into a deck. Run `node checks/preview-starters.mjs` after changing samples or themes.
+
+A deck picks a theme with `deck.json` `theme.preset`. The theme's colors and fonts apply first; `scheme`, colors and fonts in `deck.json` override them.
+
+A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded host origin>#<slide id>`. The viewer then shows the stage and a slide strip, without its toolbar, overview and help. Messages are `{ "slides": 1, "type": "<name>", ... }` over `postMessage`. The viewer takes commands only from its parent window at the `host` origin and posts only to its parent with that origin as the target. The host must accept messages only from the frame's window and the site origin.
+
+| Viewer → host | Fields |
+|---|---|
+| `ready` | `contract`, `siteType` (`name`, `version`), `outline`; sent again after the viewer reloads |
+| `outline` | `outline`: `title`, `theme` (`preset`, `scheme`), `slides` (`id`, `title`, `section` title or `null`, `missing`); after any change |
+| `slide` | `id`, `index` of the current slide |
+| `edited` | `id`, `path` (`project/slides/<id>.html`), `html`: the whole slide file after a hand edit, sanitized; `baseHtml`: the exact source before this edit. The host compares the current file to `baseHtml` before saving, so stale edits cannot overwrite another writer. |
+| `editable` | `id`, `count`: in edit mode, how many text blocks of the slide on the stage can be edited, `0` for a slide not written yet or malformed |
+| `editing` | `on`, `id` (or `null`), `count`: edit state after a host command, double-click, Escape, outside click or navigation |
+| `selection` | `id`, ephemeral `token`, `text`, `rect` (`left`, `top`, `width`, `height` in viewer viewport CSS pixels); `{selection:null}` clears it |
+| `exporting` | `done`, `total` slides while an export runs |
+| `exported` | `format` (`pptx`), `filename`, `bytes` (an `ArrayBuffer`, transferred), `warnings`: `[{ code, slides }]` for what did not map exactly |
+| `error` | `code`, `message` for a failed command: `slide-unknown`, `command-invalid`, `selection-stale`, `export-busy`, `export-failed` |
+
+| Host → viewer | Fields |
+|---|---|
+| `goto` | `id` |
+| `present` | `on`: `true` shows the stage alone, with keyboard and click navigation and builds; `false` brings the strip back. The host makes the frame fullscreen itself in its click handler (`iframe.requestFullscreen()`, then `iframe.focus()` so the keys reach the deck), sends `on: true`, and sends `on: false` when `fullscreenchange` leaves fullscreen. |
+| `print` | The print dialog (save as PDF) |
+| `scheme` | `scheme`: `light` or `dark` |
+| `edit` | `on`, optional `enabled`: `{on:false,enabled:true}` grants owner permission and arms double-click; `{on:false,enabled:false}` revokes it. `on:true` enters plain text editing and reveals builds; `on:false` flushes and exits. Legacy `on:true` without `enabled` remains an explicit grant. |
+| `replace` | `id`, `token`, `text`: replace the captured selection as plain text and send `edited` immediately; stale ranges fail with `selection-stale` |
+| `clear-selection` | Clear the selection and toolbar without exiting editing |
+| `export` | `format`: `pptx` |
+| `connect-sync` | One transferred `MessagePort` for audience/presenter synchronization, accepted from the configured host origin. The host connects the audience and a sandboxed `?presenter=1&host=<host origin>` frame in a popup whose `opener` is `null`. |
+
+Unknown types and messages of another `slides` major are ignored. In embed mode the viewer's own keys for fullscreen, overview and help are off.
+
+`?thumb=1` renders only the full 16:9 stage, without chrome or slide strip. Combine it with embed and host parameters when a gallery also needs authenticated outline messages. A text selection that crosses editable blocks is trimmed to the first block before the viewer sends it to the host.
+
+Editing permission starts off. Hosts grant it only to deck owners; shared decks must never receive a grant. Double-click selects the clicked word and starts editing. Escape, a click outside editable text or changing slides flushes and exits. The parent must send `edit {on:false}` for clicks outside the viewer, excluding its selection toolbar. Toolbar focus retains the captured range. A token is valid only for the same current slide and unchanged block, nodes, boundaries and text; a DOM mutation within the selected block invalidates it. Selection rectangles already include the stage transform. Hosts map them through the outer iframe's position and scale.
+
+A hand edit is written back into the slide file's own markup: only the edited text changes, and the file's attributes, notes and relative URLs stay. `<style>` text is kept as written, and a `<style>` before the section moves into it, so the slide looks the same. Only typing sends `edited`: switching edit mode or moving between slides sends nothing, and neither does a text typed and then restored. The viewer shows the edit at once and keeps it while refreshes still return an older version of the file, for at most three such refreshes; a version from another writer replaces it at once. Typing that still waits for its pause when the deck changes is settled first: it is sent when the change is elsewhere, and dropped when another writer changed the same slide.
+
+The PowerPoint export (`export`, or the download button of the viewer's toolbar) keeps text, lists and tables editable and adds the notes. Fonts are referenced, not embedded, so a recipient without the deck fonts sees substitutes. Decorations that PowerPoint shapes cannot express become pictures: JPEG when they are opaque, PNG otherwise, and one stored copy for a picture that repeats on several slides. An app frame becomes its poster, linked to the app's address. Builds and animations are not exported; `warnings` names the slides concerned (`rasterized-decoration`, `image-fit-baked`, `image-radius-dropped`, `radius-approximated`, `outline-dropped`, `app-without-poster`, `image-unavailable` for a background image that cannot be fetched and is left out, `raster-failed`, `picture-failed`).
+
+The host opens the presenter window itself, in its click handler: `window.open("https://<site>/?presenter=1#<slide id>")`, without `noopener`. That window finds the embedded viewer through its opener's frames, and the two follow each other through window references, since storage partitioning keeps them on different `BroadcastChannel`s.
 
 ## Release check
 
@@ -54,8 +106,10 @@ Every site follows its major, so a viewer change reaches every deck on that majo
 - check mode reports an error, or a warning that the deck's `check.json` does not expect, sanitizer removals included;
 - a sanitizer payload leaves an execution marker;
 - a slide's screenshot, on the stage or in print, light or dark, differs from the same deck rendered by the previous release (the highest `slides-v*` tag at or below the candidate version);
-- keyboard navigation, the overview, the presenter window's sync with the audience window, or the PDF page count goes wrong;
-- the package changed but `version` did not go up, or `TYPE_VERSION` in `viewer.js` differs from `type.json`.
+- keyboard navigation, the overview, the presenter window's sync with the audience window, the host protocol, hand edits, or the PDF page count goes wrong;
+- the PowerPoint export of a deck has the wrong slide count or notes, XML that PowerPoint would have to repair, a picture stored twice or a link to a missing part, or, for a deck whose `check.json` has `export`, another number of JPEG pictures or other slide links;
+- a theme in `slides.json` lacks its preview, stylesheet or font files, or its preview is not 16:9;
+- the package changed but `version` did not go up, or `TYPE_NAME` and `TYPE_VERSION` in `viewer.js` differ from `type.json`.
 
 The check runs on every pull request. To run it locally:
 
