@@ -7,7 +7,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.6.1"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.6.2"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 // The major of slides.json and of the host protocol; a host supports exactly one.
 const CONTRACT = 1;

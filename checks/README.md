@@ -31,7 +31,7 @@ The selection toolbar protocol is checked on the same embedded deck: owner permi
 
 ## `accept.json`
 
-Entries are keyed by the candidate version and are needed only until that version is tagged: then the tag becomes the baseline, the entries never match again, and they are deleted. Pending now: `1.2.0`, `1.3.0` and `1.5.0` `presets/*`, because the `presets` deck uses `theme.preset`, which the baseline `slides-v1.1.0` ignores. Delete them after the corresponding releases are tagged.
+Entries are keyed by the candidate version and are needed only until that version is tagged: then the tag becomes the baseline, the entries never match again, and they are deleted. Pending now: `1.2.0`, `1.3.0`, `1.5.0` and `1.6.2` `presets/*`, because the `presets` deck uses `theme.preset`, which the baseline `slides-v1.1.0` ignores. Delete them after the corresponding releases are tagged.
 
 ## `check.json`
 
@@ -68,6 +68,7 @@ Optional, beside `project/`. Without it a deck must produce no issues and no not
 - `preset` is the theme check mode must show the deck in; `scheme` is the scheme the deck opens in without `?theme` (default: `deck.json` `theme.scheme`, else `light`); `deckErrors` lists the deck-level error codes the deck must cause.
 - `embed` runs the host protocol check, with the `missing` slide removed until the run publishes it, and hand edits on the `edit` slide.
 - `export` fixes the PowerPoint export's number of JPEG pictures (`jpeg`) and each slide's external link targets (`links`, by slide id, site-relative for the deck's own pages); a slide not listed must have none.
+- `export.svg` checks attributes of exported SVG elements by id. Numeric opacity values allow one 8-bit alpha step for browser color quantization.
 
 A payload marks execution by setting a `window` property that starts with `__exec`, or by requesting `/api/probe` or any `probe.invalid` URL.
 

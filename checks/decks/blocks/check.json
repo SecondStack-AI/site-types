@@ -1,0 +1,17 @@
+{
+  "export": {
+    "jpeg": 1,
+    "links": { "inline": ["https://example.com/docs"] },
+    "svg": {
+      "alpha-fill": { "fill": "#FF0000", "fill-opacity": 0.5 },
+      "alpha-stroke": { "stroke": "#0000FF", "stroke-opacity": 0.2 },
+      "alpha-stop": { "stop-color": "#FF0000", "stop-opacity": 0.2 },
+      "transparent-stop": { "stop-color": "#000000", "stop-opacity": 0 },
+      "gradient-fill": { "fill-opacity": 0.6 },
+      "alpha-current": { "fill": "#008000", "fill-opacity": 0.25 },
+      "opaque-fill": { "fill": "#0000FF", "fill-opacity": 0.6 },
+      "alpha-group": { "opacity": 0.5 },
+      "group-fill": { "fill-opacity": 0.5 }
+    }
+  }
+}

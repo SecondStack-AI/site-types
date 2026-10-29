@@ -611,8 +611,9 @@ async function imageData(img) {
   return data; // PptxGenJS writes SVG with its own PNG preview.
 }
 
-const SVG_PROPS = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray", "stroke-linecap", "stroke-linejoin",
-  "opacity", "font-family", "font-size", "font-weight", "font-style", "text-anchor", "dominant-baseline", "letter-spacing", "color", "stop-color", "stop-opacity", "visibility", "display"];
+const SVG_PAINT_OPACITY = { fill: "fill-opacity", stroke: "stroke-opacity", "stop-color": "stop-opacity" };
+const SVG_PROPS = ["fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-linecap", "stroke-linejoin",
+  "opacity", "font-family", "font-size", "font-weight", "font-style", "text-anchor", "dominant-baseline", "letter-spacing", "color", "stop-color", "visibility", "display"];
 
 // Inline SVG uses the deck's CSS variables and classes, which a standalone file does not have, so
 // every computed paint property is written onto the copy as a presentation attribute.
@@ -626,14 +627,17 @@ function svgData(svg, box) {
     for (const prop of SVG_PROPS) {
       let value = cs.getPropertyValue(prop);
       if (!value) continue;
+      let paintAlpha = 1;
       if (prop === "fill" || prop === "stroke" || prop === "stop-color" || prop === "color") {
         if (value.startsWith("url(")) value = value.replace(/url\("?[^#]*(#[^")]+)"?\)/, "url($1)");
         else if (value !== "none") {
           const c = color(value);
-          value = c ? `#${c.hex}` : "none";
-          if (c && c.alpha < 1) target.setAttribute(`${prop === "stop-color" ? "stop" : prop}-opacity`, String(c.alpha));
+          value = c ? `#${c.hex}` : prop === "stop-color" || prop === "color" ? "#000000" : "none";
+          paintAlpha = c?.alpha ?? 0;
         }
       }
+      const opacityProp = SVG_PAINT_OPACITY[prop];
+      if (opacityProp) target.setAttribute(opacityProp, String(paintAlpha * Number(cs.getPropertyValue(opacityProp))));
       if (prop === "font-family") value = value.split(",")[0].trim();
       target.setAttribute(prop, value);
     }

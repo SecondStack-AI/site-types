@@ -1098,10 +1098,15 @@ async function inspectPptx(page, bytes) {
     const links = [];
     const media = Object.keys(zip.files).filter((name) => /^ppt\/media\/[^/]+$/.test(name));
     const contents = new Map();
+    const svgElements = {};
     for (const name of media) {
       const content = await zip.file(name).async("base64");
       if (contents.has(content)) problems.push(`${name} has the same bytes as ${contents.get(content)}`);
       else contents.set(content, name);
+      if (name.endsWith(".svg")) {
+        const svg = new DOMParser().parseFromString(await zip.file(name).async("string"), "image/svg+xml");
+        for (const el of svg.querySelectorAll("[id]")) svgElements[el.id] = Object.fromEntries([...el.attributes].map((attr) => [attr.name, attr.value]));
+      }
     }
     for (let i = 1; i <= count; i += 1) {
       const rels = docs.get(`ppt/slides/_rels/slide${i}.xml.rels`);
@@ -1118,7 +1123,7 @@ async function inspectPptx(page, bytes) {
       notes.push(body ? [...body.getElementsByTagNameNS(A, "p")].map((p) => [...p.getElementsByTagNameNS(A, "*")]
         .filter((el) => el.localName === "t" || el.localName === "br").map((el) => (el.localName === "br" ? "\n" : el.textContent)).join("")).join("\n").trim() : "");
     }
-    return { count, notes, links, media, problems };
+    return { count, notes, links, media, svgElements, problems };
   }, Buffer.from(bytes).toString("base64"));
 }
 
@@ -1147,6 +1152,13 @@ async function exportCheck(context, site, deck, problems) {
       const got = (pptx.links[index] || []).map((url) => url.replace(site.url, ""));
       if (JSON.stringify(got) !== JSON.stringify(want)) problems.push(`export links for ${id}: ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
     });
+    for (const [id, attributes] of Object.entries(expected.svg || {})) {
+      for (const [attribute, want] of Object.entries(attributes)) {
+        const got = pptx.svgElements[id]?.[attribute];
+        const matches = typeof want === "number" ? got !== undefined && Math.abs(Number(got) - want) <= 1 / 255 : got === want;
+        if (!matches) problems.push(`export SVG ${id} ${attribute} is ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+      }
+    }
   }
   if (await page.locator(".update-banner").count()) problems.push(`the export shows ${JSON.stringify(await page.locator(".update-banner").textContent())}`);
   await closePage(page);
