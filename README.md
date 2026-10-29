@@ -67,7 +67,7 @@ A host app embeds a deck by framing `https://<site>/?embed=1&host=<url-encoded h
 | `ready` | `contract`, `siteType` (`name`, `version`), `outline`; sent again after the viewer reloads |
 | `outline` | `outline`: `title`, `theme` (`preset`, `scheme`), `slides` (`id`, `title`, `section` title or `null`, `missing`); after any change |
 | `slide` | `id`, `index` of the current slide |
-| `edited` | `id`, `path` (`project/slides/<id>.html`), `html`: the whole slide file after a hand edit, sanitized; the host saves it byte for byte |
+| `edited` | `id`, `path` (`project/slides/<id>.html`), `html`: the whole slide file after a hand edit, sanitized; `baseHtml`: the exact source before this edit. The host compares the current file to `baseHtml` before saving, so stale edits cannot overwrite another writer. |
 | `editable` | `id`, `count`: in edit mode, how many text blocks of the slide on the stage can be edited, `0` for a slide not written yet or malformed |
 | `editing` | `on`, `id` (or `null`), `count`: edit state after a host command, double-click, Escape, outside click or navigation |
 | `selection` | `id`, ephemeral `token`, `text`, `rect` (`left`, `top`, `width`, `height` in viewer viewport CSS pixels); `{selection:null}` clears it |

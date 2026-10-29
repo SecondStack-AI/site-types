@@ -641,7 +641,8 @@ async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, no
   const id = deck.expect.embed.edit;
   const index = deck.order.indexOf(id);
   const file = path.join(dataDir, "project", "slides", `${id}.html`);
-  const styleText = /<style>[\s\S]*?<\/style>/.exec(await readFile(file, "utf8"))[0];
+  const original = await readFile(file, "utf8");
+  const styleText = /<style>[\s\S]*?<\/style>/.exec(original)[0];
   const stage = viewer.locator(".stage .slide-host");
   const send = (message) => page.evaluate((m) => window.send(m), message);
   const isSlide = (target) => (message) => message.type === "slide" && message.id === target;
@@ -690,6 +691,7 @@ async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, no
   const edited = await waitMessage("edited", (message) => message.type === "edited" && message.id === id);
   if (edited) {
     const { html } = edited;
+    if (edited.baseHtml !== original) fail("the first edit lost the source the user edited");
     const markup = html.replace(styleText, "");
     if (edited.path !== `project/slides/${id}.html`) fail(`edited names the path ${edited.path}`);
     const want = ["<h2>Plan</h2>", "<aside>Keep this short.</aside>", 'src="assets/dot.svg"', 'data-step="1"', "<em>Finance</em>"];
@@ -708,6 +710,7 @@ async function editProtocol({ page, viewer, site, dataDir, deck, waitMessage, no
   // The saved file comes back unchanged except for the next edit's own text.
   await typeInto(stage.locator("em"), "End", " team");
   const second = await waitMessage("a second edit", (message) => message.type === "edited" && message.id === id);
+  if (edited && second && second.baseHtml !== edited.html) fail("the next edit did not advance its source to the previous saved HTML");
   if (edited && second && second.html !== edited.html.replace("<em>Finance</em>", "<em>Finance team</em>")) fail(`a second edit changed more than its text: ${JSON.stringify(edited.html)} then ${JSON.stringify(second.html)}`);
   if (second) await writeFile(file, second.html);
   site.deploy();

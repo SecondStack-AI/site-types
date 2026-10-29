@@ -7,7 +7,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.6.3"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.6.4"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 // The major of slides.json and of the host protocol; a host supports exactly one.
 const CONTRACT = 1;
@@ -2426,7 +2426,7 @@ function flushEdit() {
   pending.stale = 0;
   pendingEdits.set(id, pending);
   state.slides.set(id, { id, text: html, ...parseSlide(id, html) });
-  postToHost("edited", { id, path: `project/slides/${id}.html`, html });
+  postToHost("edited", { id, path: `project/slides/${id}.html`, html, baseHtml: slide.text });
   view.dataChanged?.({ deckChanged: false, orderChanged: false, changedSlides: new Set([id]) });
   reportOutline();
 }
