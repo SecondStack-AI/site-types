@@ -58,6 +58,7 @@
       popup.document.body.style.margin = "0";
       const frame = popup.document.createElement("iframe");
       frame.setAttribute("sandbox", viewer.getAttribute("sandbox"));
+      frame.setAttribute("allow", "fullscreen");
       frame.style.cssText = "display:block;width:100vw;height:100vh;border:0";
       frame.onload = () => {
         const channel = new MessageChannel();
