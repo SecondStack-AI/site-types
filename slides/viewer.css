@@ -356,6 +356,7 @@ kbd {
   background: var(--s-surface);
   border: 1px solid var(--s-border);
 }
+.notice-card .notice-action { margin-top: 18px; }
 .notice-mark { width: 52px; height: 6px; margin: 0 auto 22px; border-radius: 3px; background: var(--s-accent); }
 .notice .spinner {
   width: 22px;
