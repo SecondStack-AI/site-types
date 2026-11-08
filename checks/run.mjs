@@ -1172,6 +1172,33 @@ async function exportCheck(context, site, deck, problems) {
   await closePage(page);
 }
 
+// A viewer file that does not load must leave the error and a reload on the page, not a blank viewer,
+// and the reload must open the deck once the file loads again. The run has its own record, as the
+// viewer logs the failure as a console error.
+async function startError(browser, site, deck, problems) {
+  const record = { errors: [], markers: [] };
+  const context = await newContext(browser, record, CANDIDATE_DIR);
+  try {
+    const page = await context.newPage();
+    await page.route("**/_type/slide.css", (route) => route.fulfill({ status: 503, body: "" }));
+    await page.goto(`${site.url}/#${deck.order[0]}`);
+    const alert = page.locator('#app .notice[role="alert"]');
+    if (!(await alert.waitFor({ timeout: 10000 }).then(() => true, () => false))) {
+      problems.push(`a failed start shows no error: #app holds ${JSON.stringify(await page.locator("#app").innerHTML())}`);
+      return;
+    }
+    const shown = { title: await alert.locator("h1").textContent(), detail: await alert.locator("pre").textContent(), busy: await page.locator("#app[aria-busy]").count() };
+    if (shown.title !== "The presentation could not be loaded" || shown.detail !== "slide.css: HTTP 503" || shown.busy) problems.push(`a failed start shows ${JSON.stringify(shown)}`);
+    if (!record.errors.some((line) => line.includes("[slides] the viewer could not start"))) problems.push("a failed start logs no console error");
+    await page.unroute("**/_type/slide.css");
+    await alert.getByRole("button", { name: "Reload" }).click();
+    if (!(await textIs(page, ".counter", `1 / ${deck.order.length}`))) problems.push("Reload after a failed start did not open the deck");
+    await closePage(page);
+  } finally {
+    await context.close();
+  }
+}
+
 // Serves one deck with the candidate package and checks everything but the visual diff.
 const stepsOf = (report) => report.slides.map((slide) => slide.steps || 0);
 
@@ -1196,6 +1223,7 @@ async function runCandidate(browser, deck, version, diff) {
     if (deck.expect.activate) await activate(context, site, deck);
     await exportCheck(context, site, deck, problems);
     if (deck.expect.embed) await embedProtocol(browser, deck, version, problems);
+    if (deck.expect.startError) await startError(browser, site, deck, problems);
     if (existsSync(path.join(deck.dir, "type"))) problems.push(...await checkThemeFiles([path.join(deck.dir, "type"), CANDIDATE_DIR], `${deck.name}/type`));
     for (const page of context.pages()) await collectMarkers(page);
   } finally {

@@ -7,7 +7,7 @@
 import DOMPurify from "/_type/vendor/purify.es.js";
 
 const TYPE_NAME = "slides";
-const TYPE_VERSION = "1.6.6"; // must equal type.json "version"; repin detection compares against it
+const TYPE_VERSION = "1.7.0"; // must equal type.json "version"; repin detection compares against it
 const TYPE_ID = `${TYPE_NAME}@${TYPE_VERSION}`;
 // The major of slides.json and of the host protocol; a host supports exactly one.
 const CONTRACT = 1;
@@ -2626,4 +2626,17 @@ async function start() {
   schedulePoll(true);
 }
 
-start();
+// A start that fails (a viewer file that did not load, an error in the first render) replaces the
+// half-built viewer with the error and a reload, so the visitor does not see a blank page.
+function showStartError(error) {
+  console.error("[slides] the viewer could not start", error);
+  app.removeAttribute("aria-busy");
+  app.replaceChildren(h("div", { class: "notice", role: "alert" }, h("div", { class: "notice-card" },
+    h("div", { class: "notice-mark" }),
+    h("h1", { text: t("deckError") }),
+    h("pre", { text: String(error?.message || error) }),
+    h("button", { type: "button", class: "text-btn notice-action", onclick: () => location.reload() }, t("reload")),
+  )));
+}
+
+start().catch(showStartError);
