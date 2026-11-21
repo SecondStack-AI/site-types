@@ -1,4 +1,4 @@
-# Slides 1.7.0
+# Slides 1.7.1
 
 A Slides site is a presentation. The viewer is part of the site type: it shows each slide in a 16:9 frame, with keyboard and touch navigation, an overview, a presenter window with notes and a timer, fullscreen, light and dark themes and print to PDF. You write only the deck data: one JSON file and one HTML fragment per slide. Do not write `index.html`, CSS files or JavaScript.
 
@@ -96,32 +96,32 @@ Use an app page for anything that reacts: a poll, a form, a quiz, a small game, 
 The type's themes are in `_type/slides.json` of its viewer files. Each has an `id`, a `title`, a `description` of its colors and fonts, a default `scheme` and a `preview` image (a path under `_type/`); `defaultTheme` is the theme of a deck without `preset`.
 
 - When the user names a theme, or a look that one theme matches, use it.
-- For a new deck where the user named none and there is more than one theme, ask before you write. With the `ask_user_rich` tool (through `more_tools_find` and `more_tools_call`), offer one option per theme: its `title` as label, its `description`, and an image preview with the path of its preview file in the imported directory (`/workspace/sites/<name>-preview/_type/<preview>`). Without that tool, ask in plain text with each title and description. With one theme, do not ask.
+- For a new deck where the user named none and there is more than one theme, ask before you write. With the `ask_user_rich` tool (through `more_tools_find` and `more_tools_call`), offer one option per theme: its `title` as label, its `description`, and an image preview with the path of its preview file in the viewer directory (`/workspace/sites/<name>-preview/_type/<preview>`). Without that tool, ask in plain text with each title and description. With one theme, do not ask.
 - Write the chosen `id` to `theme.preset`. Do not copy the theme's colors or fonts into `deck.json`. To change the theme of a deck later, change only `theme.preset`.
 
 ## Build a deck
 
-1. Call `site_types` with `name="slides"`. Use the exact `type` it reports, for example `slides@1.7.0`, in every call below.
-2. Call `import_site` with that `type` and a new directory, for example `/workspace/sites/<name>-preview/`, read `_type/slides.json` there and choose the theme (Themes).
+1. Read the type through the host's Sites API, as its sites Skill shows: `/spot/api/types/slides` names the `latest` version. Deploy with that exact `type`, for example `slides@1.7.1`, every time.
+2. Unzip the viewer package of that version (`/spot/api/types/slides/<version>/package`) into a new, empty directory, for example `/workspace/sites/<name>-preview/`, read `_type/slides.json` there and choose the theme (Themes).
 3. Plan the deck: the story, the sections and the slide ids, one idea per slide. Start with a `title` slide and end with a closing slide.
-4. Write `project/deck.json` with the complete `order` first, then the slide files one by one. The viewer shows a placeholder for each listed slide whose file does not exist yet and fills it when the file appears, so you can publish early and keep writing.
-5. Preview and check (below), fix every error, then publish.
+4. Write `project/deck.json` with the complete `order` first, then the slide files one by one. The viewer shows a placeholder for each listed slide whose file does not exist yet and fills it when the file appears, so you can deploy early and keep writing.
+5. Preview and check (below), fix every error, then deploy.
 
 ## Preview and check
 
 The workspace cannot open the published site. Check the deck locally with the viewer package:
 
-1. Use the directory from Build step 2, or call `import_site` with `type="slides@1.7.0"` and a new directory, for example `/workspace/sites/<name>-preview/`. It contains `index.html` and `_type/`.
-2. Copy the deck data into it, replacing any earlier copy, so deleted files do not linger: `rm -rf /workspace/sites/<name>-preview/project && cp -r /workspace/sites/<name>/project /workspace/sites/<name>-preview/`. Repeat after each change. Never publish the preview directory.
+1. Use the viewer directory from Build step 2, or unzip the package again into a new directory. It contains `index.html` and `_type/`.
+2. Copy the deck data into it, replacing any earlier copy, so deleted files do not linger: `rm -rf /workspace/sites/<name>-preview/project && cp -r /workspace/sites/<name>/project /workspace/sites/<name>-preview/`. Repeat after each change. Never deploy the preview directory.
 3. Serve it: `python3 -m http.server 8765 --bind 127.0.0.1 --directory /workspace/sites/<name>-preview` in the background.
 4. Open `http://127.0.0.1:8765/?check=1` in the workspace browser. Check mode lists every slide with its issues and outlines overflowing elements. When `document.documentElement.dataset.slidesCheck` is `"done"`, the full report is the JSON text of `#slides-check-report` and the `[slides-check]` console line. `ok` is `false` while any error remains. While slides are still missing, the browser console also shows 404 errors for their files; that is expected.
 5. Fix each error: `overflow` and `clipped` mean the content does not fit, so shorten it or split the slide; `missing`, `malformed`, `asset-missing`, `asset-timeout` and deck issues name the file to fix; `unknown-preset` means `theme.preset` is not an `id` from `_type/slides.json`. Rerun the check until `ok` is `true` and `complete` is `true`, then look at a few slides in normal mode (`http://127.0.0.1:8765/#<slide-id>`).
 
-## Publish
+## Deploy
 
-- Publish the data directory, `/workspace/sites/<name>/`, which holds `project/` and optionally `_spot.json`, with `publish_site(path=..., site=<name>, type="slides@1.7.0")`. It needs no `index.html`; never include the preview files. Leave `type_target` empty.
-- Only files under `project/` and `_spot.json` belong in it. Publishing refuses other files and names the first offending path; every `.json` file must be valid JSON.
-- An edit of an existing deck starts with `import_site(site=<name>, path=<empty directory>)`, which reports the exact type to publish with. The owner can also change slide text by hand, and those edits are saved into the slide files, so never edit from an older copy. Edit, check and publish with that `type`. A pin mismatch error (409) means the site now pins another version: import it again and redo the edit there.
+- Deploy the data directory, `/workspace/sites/<name>/`, which holds `project/` and optionally `_spot.json`, with `type=slides@<version>`, as the host's sites Skill shows. It needs no `index.html`; never include the preview files. Leave `type_target` empty. Every deploy of an existing deck passes the version of your last deploy or download as `if_version`.
+- Only files under `project/` and `_spot.json` belong in it. A deploy refuses other files and names the first offending path; every `.json` file must be valid JSON.
+- An edit of an existing deck starts with a download of its source into an empty directory; the download reports the exact type (`X-Spot-Type`) and version (`X-Spot-Version`) to deploy with. The owner can also change slide text by hand, and those edits are saved into the slide files, so never edit from an older copy. Edit, check and deploy with that `type` and version. A pin mismatch error (409) means the site now pins another version: download it again and redo the edit there.
 - Give the user the link with one sentence on what the deck covers. The presenter view opens with `S`, the overview with `O`, fullscreen with `F`; browser print saves a PDF with one page per slide, and the toolbar's download button a PowerPoint file.
 
 ## Starter examples
